@@ -1,0 +1,53 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Claude Code
+.claude/
+CLAUDE.md.local
+
+# Environment / Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+
+# Python (future adapters)
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node (future tooling)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+
+# Logs
+*.log
+logs/
+
+# Test data (実マニュアルはアップしない)
+test-data/
+samples/
+*.docx
+*.xlsx
+*.pdf
+!docs/**/*.pdf
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
