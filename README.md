@@ -44,13 +44,20 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 │   ├── design-principles.md   # 設計原則（疎結合・交換可能）
 │   ├── phase-plan.md          # フェーズ計画
 │   └── research-notes.md      # ベストプラクティス調査メモ
+├── contracts/                 # コンポーネント間の契約（OpenAPI 等）
+│   └── docstore-openapi.yaml  # DocStore Adapter API 仕様
+├── services/                  # Dify とは独立した HTTP サービス群
+│   ├── docstore-growi/        # GROWI 向け DocStore Adapter
+│   └── sync/                  # DocStore → Dify Knowledge 同期サービス
 ├── dify/
-│   ├── workflows/             # Dify Chatflow/Workflow DSL (YAML)
-│   │   ├── phase1a-qa-bot.yml
-│   │   └── README.md          # インポート手順
-│   └── adapters/              # DocStore Adapter (将来 Phase 1b 以降)
+│   └── workflows/             # Dify Chatflow/Workflow DSL のみ
+│       ├── phase1a-qa-bot.yml
+│       └── README.md          # インポート手順
 └── conventions/               # IA・ライティング規約・テンプレ（将来）
 ```
+
+**重要**: `services/` と `contracts/` は Dify 非依存。
+Dify は HTTP Request ノードで services を叩くだけで、内部実装を知らない。
 
 ## 今やること（Phase 1a）
 

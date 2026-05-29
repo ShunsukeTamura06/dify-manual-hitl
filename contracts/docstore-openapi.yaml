@@ -1,0 +1,331 @@
+openapi: 3.1.0
+info:
+  title: DocStore Adapter API
+  version: 0.1.0
+  description: |
+    Wiki 実装を隠蔽する統一インターフェース。
+    GROWI / Confluence / Notion / Filesystem 等の実装はこの契約を満たす。
+
+    呼び出し側（Sync Service、登録 Bot 等）は Wiki 実装を知らずに動く。
+
+    このファイルが「真実の契約」。実装より先にここを更新する。
+
+servers:
+  - url: http://localhost:8001
+    description: ローカル開発
+  - url: http://{adapter-host}:8001
+    description: 本番（環境ごとに変わる）
+    variables:
+      adapter-host:
+        default: docstore-adapter
+
+tags:
+  - name: pages
+    description: ページ CRUD
+  - name: changes
+    description: 変更検知（同期用）
+  - name: meta
+    description: ヘルス・メタ情報
+
+paths:
+  /pages:
+    get:
+      tags: [pages]
+      summary: ページ一覧を取得（軽量版）
+      parameters:
+        - name: path_prefix
+          in: query
+          schema: { type: string }
+          description: パスのプレフィックスで絞り込み（例 /manuals/経理/）
+        - name: status
+          in: query
+          schema: { type: string, enum: [published, draft, deprecated] }
+        - name: cursor
+          in: query
+          schema: { type: string }
+          description: ページネーション用カーソル
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 500 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageList' }
+
+    post:
+      tags: [pages]
+      summary: ページ新規作成
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PageCreateRequest' }
+      responses:
+        '201':
+          description: 作成成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Page' }
+        '409':
+          description: パス重複
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /pages/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+        description: Adapter 固有のページ ID（不透明な文字列）
+
+    get:
+      tags: [pages]
+      summary: ページ取得（本文付き）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Page' }
+        '404':
+          description: 該当なし
+
+    put:
+      tags: [pages]
+      summary: ページ全置換更新
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PageUpdateRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Page' }
+        '404':
+          description: 該当なし
+        '409':
+          description: 楽観ロック衝突（expected_version 不一致）
+
+    delete:
+      tags: [pages]
+      summary: ページ削除
+      responses:
+        '204':
+          description: 削除成功
+        '404':
+          description: 該当なし
+
+  /pages/changes:
+    get:
+      tags: [changes]
+      summary: 指定時刻以降に変更があったページの一覧
+      description: |
+        Sync Service が定期バッチで呼ぶ。
+        webhook が取りこぼした変更を補修するための保険ルート。
+      parameters:
+        - name: since
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+          description: この時刻以降の変更を返す
+        - name: include_deleted
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  changes:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChangeEvent' }
+                  next_since:
+                    type: string
+                    format: date-time
+
+  /health:
+    get:
+      tags: [meta]
+      summary: ヘルスチェック
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok, degraded] }
+                  wiki_reachable: { type: boolean }
+
+  /info:
+    get:
+      tags: [meta]
+      summary: Adapter のメタ情報
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  adapter_name: { type: string, example: growi }
+                  adapter_version: { type: string, example: 0.1.0 }
+                  wiki_type: { type: string, example: GROWI }
+                  capabilities:
+                    type: array
+                    items:
+                      type: string
+                      enum: [create, update, delete, search, attachments, webhooks]
+
+components:
+  schemas:
+    Page:
+      type: object
+      required: [id, path, title, content, content_format, version, updated_at, viewer_url]
+      properties:
+        id:
+          type: string
+          description: Adapter 固有の不透明 ID。呼び出し側はこの中身を解釈しない
+        path:
+          type: string
+          description: 論理パス（例 /manuals/経理/経費精算/_howto/国内出張）
+        title:
+          type: string
+        content:
+          type: string
+          description: 本文（Markdown）
+        content_format:
+          type: string
+          enum: [markdown]
+        metadata:
+          type: object
+          description: frontmatter 由来のメタデータ
+          additionalProperties: true
+          example:
+            type: howto
+            audience: 全社
+            owner: tamura@example.com
+            review_due: '2026-12-31'
+            related: ['/manuals/...']
+            status: published
+            canonical: false
+        version:
+          type: string
+          description: ページのバージョン識別子（リビジョン番号・ハッシュ等。Adapter ごとに形式異なる）
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        viewer_url:
+          type: string
+          format: uri
+          description: |
+            人間がブラウザで開く URL。呼び出し側はこの URL を再加工しない。
+            引用やリンクにそのまま使う。
+        attachments:
+          type: array
+          items: { $ref: '#/components/schemas/Attachment' }
+
+    PageMeta:
+      type: object
+      description: 一覧表示用の軽量版（本文を含まない）
+      required: [id, path, title, version, updated_at, viewer_url]
+      properties:
+        id: { type: string }
+        path: { type: string }
+        title: { type: string }
+        version: { type: string }
+        updated_at: { type: string, format: date-time }
+        viewer_url: { type: string, format: uri }
+        metadata:
+          type: object
+          additionalProperties: true
+
+    PageList:
+      type: object
+      properties:
+        pages:
+          type: array
+          items: { $ref: '#/components/schemas/PageMeta' }
+        next_cursor:
+          type: string
+          nullable: true
+
+    PageCreateRequest:
+      type: object
+      required: [path, title, content]
+      properties:
+        path: { type: string }
+        title: { type: string }
+        content: { type: string }
+        content_format:
+          type: string
+          enum: [markdown]
+          default: markdown
+        metadata:
+          type: object
+          additionalProperties: true
+
+    PageUpdateRequest:
+      type: object
+      required: [content]
+      properties:
+        title: { type: string }
+        content: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+        expected_version:
+          type: string
+          description: 楽観ロック用。指定するとバージョン不一致時に 409
+
+    ChangeEvent:
+      type: object
+      required: [event_type, page_id, occurred_at]
+      properties:
+        event_type:
+          type: string
+          enum: [created, updated, deleted, moved]
+        page_id: { type: string }
+        path: { type: string }
+        old_path:
+          type: string
+          description: moved の場合のみ
+        version: { type: string }
+        occurred_at: { type: string, format: date-time }
+
+    Attachment:
+      type: object
+      properties:
+        id: { type: string }
+        filename: { type: string }
+        mime_type: { type: string }
+        size_bytes: { type: integer }
+        url:
+          type: string
+          format: uri
+          description: 添付ファイルの取得 URL
+
+    Error:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code: { type: string }
+        message: { type: string }
+        details:
+          type: object
+          additionalProperties: true
