@@ -19,6 +19,9 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 
 詳細は [docs/architecture.md](docs/architecture.md) を参照。
 
+そして全体を貫く設計思想は [docs/design-principles.md](docs/design-principles.md)。
+**新しいコンポーネントを追加するときは必ずチェックリストを通すこと。**
+
 ## フェーズ
 
 | Phase | 内容 | 状態 |
@@ -38,6 +41,7 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 ├── README.md                  # このファイル
 ├── docs/                      # 設計ドキュメント
 │   ├── architecture.md        # アーキテクチャ全体像
+│   ├── design-principles.md   # 設計原則（疎結合・交換可能）
 │   ├── phase-plan.md          # フェーズ計画
 │   └── research-notes.md      # ベストプラクティス調査メモ
 ├── dify/

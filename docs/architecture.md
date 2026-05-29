@@ -1,5 +1,8 @@
 # アーキテクチャ
 
+> このドキュメントは「何を作るか」を扱う。
+> 「どう作るか／崩さないか」の原則は [design-principles.md](design-principles.md) を参照。
+
 ## 全体像
 
 ```
