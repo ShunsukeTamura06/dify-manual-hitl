@@ -57,8 +57,35 @@ Wiki 層は「DocStore Adapter」というインターフェース越しに使�
 | 既に GROWI を使っている（当チーム） | GROWI Adapter |
 | 既に Confluence を使っている | Confluence Adapter |
 | 既に Notion を使っている | Notion Adapter |
+| Obsidian で個人/チーム管理している | Obsidian Vault Adapter (= Filesystem 系) |
 | 何も無い / 技術寄り | **Git + Markdown + MkDocs**（推奨デフォルト） |
 | 非技術者のみ・最低限 | 共有フォルダ + Markdown（妥協） |
+
+### Adapter 実装一覧（交換可能な部品）
+
+GROWI は「DocStore 契約を満たす実装の 1 つ」にすぎない。
+契約 ([contracts/docstore-openapi.yaml](../contracts/docstore-openapi.yaml)) さえ満たせば、
+中身が何であれ呼び出し側（Sync Service / 登録 Bot）からは同じに見える。
+
+| Adapter | `create_page` の実体 | `viewer_url` の形式 | 状態 |
+|---------|---------------------|---------------------|------|
+| **GROWI** | GROWI API で POST | `https://growi.../path` | ✅ 実装済 |
+| **Filesystem / Git** | `.md` を書く + `git commit` | MkDocs 等の公開サイト URL | ⚪ Phase 3 |
+| **Obsidian Vault** | Vault フォルダに `.md` を書く | `obsidian://open?vault=...&file=...` | ⚪ Phase 3 |
+| **Confluence** | Confluence REST API で作成 | `https://confluence.../pages/123` | ⚪ 必要時 |
+| **Notion** | Notion API でページ作成 | `https://notion.so/...` | ⚪ 必要時 |
+
+**契約は同じ、翻訳だけが違う。** 各 Adapter は「Wiki 固有形式 ↔ DocStore モデル」の変換に徹する。
+
+補足:
+- **Filesystem / Git と Obsidian Vault はほぼ同一実装**になる（どちらも「フォルダ内の `.md`
+  を読み書き」）。違いは `viewer_url` の形式程度。1 つの `docstore-filesystem` で
+  設定により両対応できる見込み。
+- **契約の限界（トレードオフ）**: Adapter パターンは「最大公約数的な機能」しか扱えない。
+  Markdown 本文 + メタデータ + 履歴までが契約の範囲。各 Wiki の尖った機能
+  （GROWI のページ権限、Confluence のマクロ、Notion の DB ビュー、Obsidian のグラフ
+  ビュー等）は契約に含めない。マニュアル管理用途ではこの最大公約数で十分カバーできる。
+  必要になれば契約を拡張する（ルール 5: スキーマバージョニングに従う）。
 
 ### DocStore Adapter インターフェース（仕様メモ）
 

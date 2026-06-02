@@ -102,11 +102,12 @@
 
 **スコープ:**
 - Filesystem (Git+Markdown+MkDocs) Adapter の実装
+  - 同一実装で Obsidian Vault にも対応（`viewer_url` を `obsidian://` 形式に切替）
 - セットアップ手順書
 - IA 規約・ライティング規約・ページテンプレートの完成
 - サンプルナレッジ（デモ用）
 
 **成果物:**
-- `dify/adapters/filesystem_adapter.py`
+- `services/docstore-filesystem/`（Git 公開サイト / Obsidian Vault 両対応）
 - `conventions/` 一式
 - `docs/setup-guide.md`
