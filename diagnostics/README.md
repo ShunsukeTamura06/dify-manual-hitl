@@ -13,6 +13,10 @@
 1. GitHub から pull して最新化
 2. 両サービスを起動（`.env` 設定済み前提）
    ```bash
+   # docker compose で一括起動（推奨）
+   cd services && docker compose up -d --build
+
+   # または個別起動
    cd services/docstore-growi && uv run uvicorn app.main:app --port 8001 &
    cd services/sync          && uv run uvicorn app.main:app --port 8002 &
    ```

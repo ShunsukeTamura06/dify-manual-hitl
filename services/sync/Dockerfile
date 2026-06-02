@@ -4,10 +4,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-RUN uv pip install --system --no-cache .
-
+# プロジェクトのビルドには pyproject.toml / README.md / app が必要
+COPY pyproject.toml README.md ./
 COPY app ./app
+RUN uv pip install --system --no-cache .
 
 EXPOSE 8002
 

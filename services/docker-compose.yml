@@ -1,0 +1,89 @@
+# manual-knowledge サービス群（Dify とは独立した compose）
+#
+# 設計原則: Dify とは別 compose で運用する。
+#   - Dify を更新してもこちらは無影響
+#   - 他チーム展開時、このディレクトリだけ持っていけば動く
+#
+# 起動:
+#   cd services
+#   cp docstore-growi/.env.example docstore-growi/.env   # 値を設定
+#   cp sync/.env.example          sync/.env              # 値を設定
+#   docker compose up -d --build
+#
+# サービス間通信:
+#   sync → docstore-growi は compose 内部 DNS (http://docstore-growi:8001)。
+#   この URL は下の environment で上書きするため .env の DOCSTORE_URL は気にしなくてよい。
+#
+# Dify / GROWI への到達:
+#   いずれも各 .env の URL で指定する。Dify が同一ホストの別 compose にいる場合は
+#   下記いずれかを使う:
+#     (A) .env の DIFY_API_BASE_URL=http://host.docker.internal:5001
+#         （extra_hosts で host-gateway を解決できるようにしてある）
+#     (B) Dify の compose ネットワークに external 参加する
+#         （ファイル末尾の networks のコメントを参照）
+
+name: manual-knowledge-services
+
+services:
+  docstore-growi:
+    build: ./docstore-growi
+    image: manual-knowledge/docstore-growi:0.1.0
+    env_file:
+      - ./docstore-growi/.env
+    ports:
+      - "8001:8001"
+    volumes:
+      # ログをホストに残す（診断バンドルで回収できるように）
+      - ./docstore-growi/logs:/app/logs
+    networks:
+      - manual-net
+    extra_hosts:
+      # Linux でも host.docker.internal を解決できるように
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/info').status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  sync:
+    build: ./sync
+    image: manual-knowledge/sync:0.1.0
+    env_file:
+      - ./sync/.env
+    environment:
+      # サービス間 URL は compose 内部 DNS で確定的に上書き（.env より優先）
+      - DOCSTORE_URL=http://docstore-growi:8001
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./sync/logs:/app/logs
+    networks:
+      - manual-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      docstore-growi:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8002/info').status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  manual-net:
+    driver: bridge
+
+  # (B) Dify の compose ネットワークに参加する場合の例:
+  #   1) Dify 側の compose が作るネットワーク名を確認 (docker network ls)
+  #   2) 下記を有効化し、各 service の networks に dify-net を追加
+  #   3) .env の DIFY_API_BASE_URL=http://docker-api-1:5001 など Dify のサービス名に
+  #
+  # dify-net:
+  #   external: true
+  #   name: docker_default   # ← 実際の Dify ネットワーク名に置き換え

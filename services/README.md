@@ -32,42 +32,54 @@ Dify とは独立して動く HTTP サービス群。
 - 他チーム展開時、Dify はそのまま・サービスだけ持っていける
 - サービス側だけ別ホストに切り出すなどの自由度がある
 
-### 物理構成
+### docker compose で一括起動（推奨）
 
-同一ホストでも別ホストでも可。同一ホストの場合は Docker external network で繋ぐ:
+[docker-compose.yml](docker-compose.yml) で 2 サービスをまとめて起動できる。
 
-```yaml
-# services/docker-compose.yml (将来作成)
-networks:
-  shared:
-    external: true
-    name: dify-net   # Dify の docker-compose が作るネットワーク
+```bash
+cd services
 
-services:
-  docstore-growi:
-    build: ./docstore-growi
-    networks: [shared]
-    environment:
-      - GROWI_BASE_URL=https://growi.internal
-      - GROWI_ACCESS_TOKEN=${GROWI_ACCESS_TOKEN}
+# 各サービスの .env を用意して値を設定
+cp docstore-growi/.env.example docstore-growi/.env
+cp sync/.env.example          sync/.env
+#  → GROWI_BASE_URL / GROWI_API_TOKEN
+#  → DIFY_API_BASE_URL / DIFY_API_KEY / DIFY_DATASET_ID を設定
 
-  sync:
-    build: ./sync
-    networks: [shared]
-    environment:
-      - DOCSTORE_URL=http://docstore-growi:8001
-      - DIFY_API_URL=http://dify-api:5001   # Dify ネットワーク内
-      - DIFY_API_KEY=${DIFY_API_KEY}
-      - DIFY_DATASET_ID=${DIFY_DATASET_ID}
+docker compose up -d --build
+
+# 状態確認
+docker compose ps
+curl http://localhost:8002/health    # docstore_reachable / dify_reachable を確認
 ```
+
+ポイント:
+- **サービス間通信**: `sync → docstore-growi` は compose 内部 DNS
+  (`http://docstore-growi:8001`) で接続。この URL は compose の `environment` で
+  上書きするので、`sync/.env` の `DOCSTORE_URL` は気にしなくてよい。
+- **ログ**: 各サービスの `logs/` をホストにマウント。診断バンドルで回収できる。
+- **ヘルスチェック**: 両サービスに healthcheck を設定済み。`docker compose ps` で
+  `healthy` を確認できる。
+
+### Dify / GROWI への到達
+
+いずれも各 `.env` の URL で指定する。Dify が同一ホストの別 compose にいる場合:
+
+| 方法 | 設定 |
+|------|------|
+| (A) host 経由 | `.env` の `DIFY_API_BASE_URL=http://host.docker.internal:5001`（compose に `host-gateway` 設定済み） |
+| (B) ネットワーク参加 | Dify の compose ネットワークに external 参加（docker-compose.yml 末尾コメント参照） |
+
+GROWI は通常ホスト名 URL（例 `https://growi.internal`）で到達できるのでそのまま。
 
 これにより:
 - Dify は services の存在を知らない（疎結合）
 - services は Dify を環境変数経由でしか知らない
 - 一方のみ再起動・更新可能
 
-## 開発時の起動順序
+### 個別起動（開発時）
+
+compose を使わず個別に動かす場合の順序:
 
 1. Dify を起動（既に稼働中ならスキップ）
-2. `docstore-growi` を起動 → ヘルスチェック
-3. `sync` を起動 → 初回同期実行
+2. `docstore-growi` を起動 → `/health` 確認
+3. `sync` を起動 → `/sync` で初回同期
