@@ -180,7 +180,8 @@ canonical: false             # この事実の正典なら true
 - 大きなドキュメントは小さく分割
 - 画像にテキスト記述を併記
 
-→ `conventions/writing-style.md` に転記（Phase 後半）
+→ 詳細は [conventions/writing-style.md](../conventions/writing-style.md)。
+ページ構造の標準形は [conventions/manual-template.md](../conventions/manual-template.md)。
 
 ## 参考文献
 

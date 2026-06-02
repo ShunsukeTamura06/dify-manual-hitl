@@ -28,7 +28,7 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 |-------|------|------|
 | 1a | 質問 Bot 単体で RAG 品質を検証（手動でマニュアル投入） | 🟢 進行中 |
 | 1b | Wiki → Dify Knowledge の自動同期 | ⚪ 未着手 |
-| 1c | 登録 Bot（アップロード → 整形 → ドラフト → HITL → 登録） | ⚪ 未着手 |
+| 1c | 登録 Bot（アップロード → 整形 → ドラフト → HITL → 登録） | 🟡 設計・準備中 |
 | 2  | Vision LLM での画像/図形対応、前処理サービス | ⚪ 未着手 |
 | 3  | 他チームへの展開（Adapter 差し替え） | ⚪ 未着手 |
 
@@ -50,10 +50,13 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 │   ├── docstore-growi/        # GROWI 向け DocStore Adapter
 │   └── sync/                  # DocStore → Dify Knowledge 同期サービス
 ├── dify/
-│   └── workflows/             # Dify Chatflow/Workflow DSL のみ
+│   └── workflows/             # Dify Chatflow/Workflow DSL
 │       ├── phase1a-qa-bot.yml
+│       ├── prompts/           # 登録 Bot のプロンプト（整形・重複判定）
 │       └── README.md          # インポート手順
-└── conventions/               # IA・ライティング規約・テンプレ（将来）
+└── conventions/               # IA・ライティング規約・テンプレ
+    ├── manual-template.md     # 標準マニュアルテンプレート
+    └── writing-style.md       # ライティング規約（RAG 最適化）
 ```
 
 **重要**: `services/` と `contracts/` は Dify 非依存。
