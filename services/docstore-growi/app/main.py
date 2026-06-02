@@ -13,13 +13,14 @@ import logging
 
 from fastapi import FastAPI
 
-from .routes import changes, meta, pages
+from .logging_setup import configure_logging
+from .routes import changes, debug, meta, pages
 from .settings import get_settings
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    logging.basicConfig(level=settings.log_level)
+    configure_logging("docstore-growi", settings.log_dir, settings.log_level)
     logger = logging.getLogger(__name__)
 
     app = FastAPI(
@@ -31,6 +32,7 @@ def create_app() -> FastAPI:
     app.include_router(meta.router)
     app.include_router(pages.router)
     app.include_router(changes.router)
+    app.include_router(debug.router)
 
     @app.on_event("startup")
     async def _startup() -> None:

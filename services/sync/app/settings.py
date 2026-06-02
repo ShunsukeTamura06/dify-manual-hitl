@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     # サービス自身
     port: int = Field(default=8002)
     log_level: str = Field(default="INFO")
+    log_dir: str = Field(default="logs")
+    debug_endpoints_enabled: bool = Field(default=True)
     request_timeout: float = Field(default=60.0)
 
     @property

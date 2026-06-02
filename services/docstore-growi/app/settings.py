@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     )
     port: int = Field(default=8001, description="待ち受けポート")
     log_level: str = Field(default="INFO", description="ログレベル")
+    log_dir: str = Field(default="logs", description="ログ出力ディレクトリ")
+    debug_endpoints_enabled: bool = Field(
+        default=True,
+        description="生レスポンスを返す /debug 系を有効にするか（診断用）",
+    )
     manual_root_path: str = Field(
         default="/manuals",
         description="対象とするマニュアルのルートパス。空なら全ページ",

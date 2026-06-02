@@ -39,6 +39,9 @@ yarn-debug.log*
 *.log
 logs/
 
+# Diagnostics output (会社データを含むため絶対にコミットしない)
+diagnostics/out/
+
 # Test data (実マニュアルはアップしない)
 test-data/
 samples/

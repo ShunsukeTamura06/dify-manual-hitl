@@ -15,11 +15,13 @@ DocStore Adapter → Dify Knowledge への同期を提供する。
 """
 
 import logging
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 
-from .dify_client import DifyKnowledgeClient
-from .docstore_client import DocStoreClient
+from .dify_client import DifyError, DifyKnowledgeClient
+from .docstore_client import DocStoreClient, DocStoreError
+from .logging_setup import configure_logging
 from .models import HealthStatus, SyncRequest, SyncResult
 from .settings import get_settings
 from .sync_engine import SyncEngine
@@ -43,7 +45,7 @@ def _make_dify() -> DifyKnowledgeClient:
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    logging.basicConfig(level=settings.log_level)
+    configure_logging("sync", settings.log_dir, settings.log_level)
     logger = logging.getLogger(__name__)
 
     app = FastAPI(
@@ -103,6 +105,39 @@ def create_app() -> FastAPI:
             "docstore_url": settings.docstore_url,
             "dify_dataset_id": settings.dify_dataset_id or "(未設定)",
         }
+
+    @app.get("/debug/raw/dify-documents")
+    async def raw_dify_documents() -> dict[str, Any]:
+        """Dify のドキュメント一覧 生レスポンス（診断用）。
+
+        バージョン差で dify_client が動かないとき、形状確認のため持ち帰る。
+        無効化したい場合は DEBUG_ENDPOINTS_ENABLED=false。
+        """
+        if not settings.debug_endpoints_enabled:
+            raise HTTPException(status_code=404, detail="debug エンドポイントは無効です")
+        dify = _make_dify()
+        try:
+            # クライアントの内部 _request を使わず、生の1ページ目を取得
+            return await dify._request(  # noqa: SLF001
+                "GET", "/documents", params={"page": 1, "limit": 20}
+            )
+        except DifyError as exc:
+            return {"_error": str(exc), "_status_code": exc.status_code}
+        finally:
+            await dify.close()
+
+    @app.get("/debug/raw/docstore-pages")
+    async def raw_docstore_pages() -> dict[str, Any]:
+        """DocStore Adapter のページ一覧 生レスポンス（診断用）。"""
+        if not settings.debug_endpoints_enabled:
+            raise HTTPException(status_code=404, detail="debug エンドポイントは無効です")
+        docstore = _make_docstore()
+        try:
+            return await docstore._get("/pages", params={"limit": 20})  # noqa: SLF001
+        except DocStoreError as exc:
+            return {"_error": str(exc), "_status_code": exc.status_code}
+        finally:
+            await docstore.close()
 
     return app
 
