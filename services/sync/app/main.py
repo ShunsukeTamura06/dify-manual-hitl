@@ -15,6 +15,8 @@ DocStore Adapter → Dify Knowledge への同期を提供する。
 """
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -48,19 +50,21 @@ def create_app() -> FastAPI:
     configure_logging("sync", settings.log_dir, settings.log_level)
     logger = logging.getLogger(__name__)
 
-    app = FastAPI(
-        title="Sync Service (DocStore → Dify Knowledge)",
-        version="0.1.0",
-        description="Wiki（DocStore）を Dify Knowledge に同期する。Wiki 非依存。",
-    )
-
-    @app.on_event("startup")
-    async def _startup() -> None:
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         if not settings.is_configured:
             logger.warning(
                 "Dify 接続が未設定です。.env に DIFY_API_KEY と "
                 "DIFY_DATASET_ID を設定してください。"
             )
+        yield
+
+    app = FastAPI(
+        title="Sync Service (DocStore → Dify Knowledge)",
+        version="0.1.0",
+        description="Wiki（DocStore）を Dify Knowledge に同期する。Wiki 非依存。",
+        lifespan=lifespan,
+    )
 
     @app.post("/sync", response_model=SyncResult)
     async def sync(req: SyncRequest) -> SyncResult:

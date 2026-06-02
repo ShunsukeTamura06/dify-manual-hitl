@@ -10,6 +10,8 @@ GROWI を contracts/docstore-openapi.yaml の DocStore API として公開する
 """
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -23,19 +25,8 @@ def create_app() -> FastAPI:
     configure_logging("docstore-growi", settings.log_dir, settings.log_level)
     logger = logging.getLogger(__name__)
 
-    app = FastAPI(
-        title="DocStore Adapter (GROWI)",
-        version="0.1.0",
-        description="GROWI を DocStore API として公開する Adapter",
-    )
-
-    app.include_router(meta.router)
-    app.include_router(pages.router)
-    app.include_router(changes.router)
-    app.include_router(debug.router)
-
-    @app.on_event("startup")
-    async def _startup() -> None:
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         if not settings.is_configured:
             logger.warning(
                 "GROWI 接続が未設定です。.env に GROWI_BASE_URL と "
@@ -43,6 +34,19 @@ def create_app() -> FastAPI:
             )
         else:
             logger.info("GROWI Adapter 起動: %s", settings.growi_base_url)
+        yield
+
+    app = FastAPI(
+        title="DocStore Adapter (GROWI)",
+        version="0.1.0",
+        description="GROWI を DocStore API として公開する Adapter",
+        lifespan=lifespan,
+    )
+
+    app.include_router(meta.router)
+    app.include_router(pages.router)
+    app.include_router(changes.router)
+    app.include_router(debug.router)
 
     return app
 
