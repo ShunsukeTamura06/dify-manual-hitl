@@ -47,6 +47,9 @@
   - 番号付きリストは連番厳守、項目間に接続詞
   - 略語・社内用語を必ず定義
   - 大きなドキュメントは分割
+- **現場適用での修正**: 「テーブルを避ける」は当プロジェクトでは撤回。
+  現場は Excel 由来で表が多く、表の維持が必須。代わりに「表は残し、直前に
+  検索用の平文を併記（登録 Bot が自動生成）」に変更（conventions/writing-style.md）。
 
 ## 重複・矛盾・非決定性の研究
 
@@ -64,7 +67,11 @@
 > "An LLM wiki that goes stale becomes actively harmful — it provides confident-sounding answers based on outdated information."
 > ([Beyond RAG: Karpathy's LLM Wiki Pattern](https://levelup.gitconnected.com/beyond-rag-how-andrej-karpathys-llm-wiki-pattern-builds-knowledge-that-actually-compounds-31a08528665e))
 
-→ owner / review_due / orphan 検知の運用が必須。
+→ 古さ対策は必須。ただし**手段**は現場で修正した。
+  当初は owner / review_due / orphan 検知（人手の棚卸し）を想定したが、
+  現場では owner / review_due を運用で埋められないと判明。
+  → 人手棚卸しに依存せず、「最終更新日（自動）からの経過 + 回答時の更新日表示・
+  古さ警告」で代替する方針に変更（docs/architecture.md「品質と鮮度の担保」）。
 
 ## HITL の位置づけ (2025-2026)
 

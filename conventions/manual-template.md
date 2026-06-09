@@ -17,15 +17,17 @@
 ---
 title: {動詞 + 目的語。例「国内出張の経費を精算する」}
 type: howto            # tutorial | howto | reference | explanation
-audience: 全社          # 全社 | 経理部 | マネージャー 等
-owner: {責任者のメール}   # 例 tamura@example.com
-review_due: {YYYY-MM-DD} # 見直し期限
 status: draft           # draft | published | deprecated
-canonical: false        # この事実の正典なら true
-related:                # 関連ページの論理パス
+# --- 以下はすべて任意。分かる人だけ埋める。空でよい ---
+audience:               # 全社 | 経理部 | マネージャー 等（任意）
+canonical: false        # この事実の正典なら true（任意）
+related:                # 関連ページの論理パス（任意）
   - /manuals/...
 source_files:           # 元になったファイル名（任意）
   - keihi_v1.2.xlsx
+# owner / review_due は「埋められる人がいれば」だけ。必須にしない
+owner:                  # 責任者メール（任意。不明なら空のまま）
+review_due:             # 見直し期限（任意。運用で埋まらないなら空のまま）
 ---
 
 # {タイトルと同じ}
@@ -85,7 +87,9 @@ source_files:           # 元になったファイル名（任意）
 3. **1 事実 1 ページ（DRY）**。同じ事実を複数ページに書かない。
    他ページからはリンク参照する。
 4. **バージョン・日付はタイトルに入れない**。メタデータ（frontmatter）に持つ。
-5. **owner と review_due は必須**。責任者不明・更新時期不明を作らない。
+5. **owner / review_due は任意**。運用で埋まらないことが分かっているので必須にしない。
+   古さの管理は「最終更新日（GROWI が自動記録）からの経過」と
+   「回答時の更新日表示」で行う（人手の棚卸しに依存しない）。
 6. ライティングの細則は [writing-style.md](writing-style.md) に従う。
 
 ---

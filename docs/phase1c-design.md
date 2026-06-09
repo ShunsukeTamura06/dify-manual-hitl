@@ -1,16 +1,27 @@
-# Phase 1c 設計: 登録 Bot
+# Phase 1c 設計: 登録 Bot（軽量版）
 
-ユーザーがアップロードしたファイルを、LLM が整形し、重複を確認し、
-Wiki にドラフトとして登録するまでを担う。
-
-HITL（人間確認）は **Wiki 上での編集・公開** で担保する（Dify 内では完結させない）。
+ユーザーがアップロードしたファイルを、LLM が整形し、Wiki にドラフトとして登録する。
+公開（＝そのまま使える状態にする）は人間が Wiki で行う。
 
 > 状態: 設計フェーズ。1b（同期）の実機検証と並行して準備中。
-> 実 API 形状に依存する部分（GROWI 書込・Dify 検索の実挙動）は 1b 検証後に確定する。
+
+## 設計の前提（現場フィードバックを反映）
+
+現場の実態を踏まえ、当初案から方針を変更した:
+
+| 当初案 | 現場の実態 | 改訂方針 |
+|--------|-----------|----------|
+| owner / review_due を必須にして棚卸し | 運用で埋められない | **任意化**。古さは最終更新日 + 回答時表示で管理 |
+| 表をフラット箇条書きに | 表は表のまま必要 | **表は残す** + 検索用平文を自動併記 |
+| 承認ゲートで正しさを担保 | 誰も正解を知らない → 形骸化 | **書込時ゲートをやめ、読込時の透明性で担保** |
+| 重複を判定して登録をブロック | — | **重複は提示のみ。ブロックしない** |
+
+→ 品質の担保場所を「書き込み時の承認」から
+  「**読み込み時の透明性（出典・更新日・矛盾検出）＋継続フィードバック**」に移す。
 
 ---
 
-## フロー全体
+## フロー全体（軽量版）
 
 ```
 [Start: ファイル添付 + 補足説明]
@@ -19,86 +30,72 @@ HITL（人間確認）は **Wiki 上での編集・公開** で担保する（Di
    ↓
 [LLM-1: 標準テンプレートに整形]
    conventions/manual-template.md + writing-style.md に従う
-   出力: 整形済み Markdown（frontmatter 込み）
+   表は残し、検索用の平文を自動併記する
+   owner/review_due は分からなければ空でよい
    ↓
-[Knowledge Retrieval] 整形結果のタイトル+概要で既存を類似検索（重複チェック）
+[Knowledge Retrieval] 類似ページを検索（重複の「気づき」用。ブロックしない）
    ↓
-[LLM-2: 判定] NEW / UPDATE / DUPLICATE / PARTIAL_OVERLAP
-   出力(JSON): { judgment, target_page_id, reason, diff_summary }
-   ↓
-[Answer + 確認] ユーザーに判定と整形結果を提示
-   「この内容で登録しますか？ [1]新規 [2]既存更新 [3]キャンセル」
+[Answer: 整形結果 + 類似ページの提示]
+   「整形しました。似たページ: {title}（{url}）。
+    このまま下書きを作成しますか？ [はい/修正指示]」
    ↓ （Conversation Variable に整形済みドラフトを保持）
-[IF: ユーザー応答]
-   ├─ 新規     → [HTTP Request: POST docstore /pages]   （status: draft）
-   ├─ 既存更新 → [HTTP Request: PUT  docstore /pages/{id}]（status: draft）
-   └─ キャンセル → 終了
+[IF: はい]
+   → [HTTP Request: POST docstore /pages]  （status: draft）
    ↓
-[Answer: 完了通知] 「GROWI で確認・公開してください: {viewer_url}」
+[Answer: 完了通知]
+   「GROWI に下書きを作成しました。確認して公開してください: {viewer_url}」
    ↓
-─────────── ここから先は Dify の外（HITL）───────────
-[ユーザーが GROWI でドラフトを確認・修正・公開]
+─────────── ここから先は Dify の外 ───────────
+[ユーザーが GROWI で下書きをざっと見て公開]
    ↓
 [GROWI 更新 → Sync Service が Dify Knowledge に反映]（Phase 1b）
 ```
 
----
-
-## HITL の置き場所
-
-| 案 | 内容 | 採否 |
-|----|------|------|
-| Dify チャット内で承認 | Bot が確認 → ユーザーが yes | 補助的に使う（登録前の意思確認） |
-| **Wiki 上で編集・公開** | ドラフトを GROWI に作り、人が GROWI で仕上げて公開 | **主たる HITL。これを採用** |
-
-理由:
-- Markdown プレビュー・Mermaid 描画・画像確認は GROWI の方が得意
-- 「整形ミスを手で直す」が GROWI の編集 UI で自由にできる
-- 公開操作 = 承認、という自然な運用
-- バージョン履歴が GROWI に残る
-
-→ 登録 Bot は **ドラフトを置くところまで**。公開は人間が Wiki で行う。
+当初案にあった「LLM-2 で NEW/UPDATE/DUPLICATE を判定してユーザーに選ばせる」
+重いダンスは**やめる**。重複は「似たページがあるよ」と提示するだけ。
+更新したい場合はユーザーが GROWI で既存ページを直接編集すればよい。
 
 ---
 
-## 重複判定ロジック（LLM-2）
+## 重複の扱い（ブロックしない）
 
-登録 Bot の肝。多層防御の中核（[architecture.md](architecture.md) 参照）。
+- Knowledge Retrieval で類似ページを引き、**情報として提示するだけ**。
+- 「新規か更新か」を機械判定して分岐させない（誰も正解を知らない前提）。
+- ユーザーが「既存を直したい」と思えば、提示された URL から GROWI で編集する。
+- 重複が生まれても、読込時に矛盾検出（質問 Bot）で表面化し、継続的に直す。
 
-### 入力
-- LLM-1 が整形した新ドラフト（タイトル + 概要 + 本文）
-- Knowledge Retrieval が返した類似候補 N 件（page_id, title, viewer_url, 抜粋, score）
+→ 完璧な重複排除を目指さない。**重複は提示で気づかせ、使う中で収束させる**。
 
-### 出力（JSON）
-```json
-{
-  "judgment": "NEW | UPDATE | DUPLICATE | PARTIAL_OVERLAP",
-  "target_page_id": "既存ページID（UPDATE/DUPLICATE/PARTIAL の場合）",
-  "target_viewer_url": "既存ページURL",
-  "confidence": 0.0,
-  "reason": "判定の根拠",
-  "diff_summary": "既存との差分の要約（UPDATE の場合）"
-}
-```
+---
 
-### 判定基準と処理
+## HITL の位置づけ（軽量）
 
-| judgment | 意味 | 処理 |
-|----------|------|------|
-| `NEW` | 既存に該当なし | 新規ドラフト作成（POST） |
-| `UPDATE` | 既存の改訂版 | 既存を更新（PUT、status: draft）。差分をユーザーに提示 |
-| `DUPLICATE` | ほぼ完全な重複 | 登録せず既存ページへ誘導 |
-| `PARTIAL_OVERLAP` | 一部重複・一部新規 | 「既存の○章を更新 + 新規章を追加」を提案。ユーザー確認 |
+- 登録 Bot は **下書きを作るところまで**。
+- 公開（status: published 化）は人間が GROWI で行う。
+  これは「正しさの承認」ではなく「明らかなゴミを出さない最小チェック + 公開操作」。
+- 重い承認フロー・複数承認者・差し戻しは作らない（形骸化するだけ）。
 
-**最終決定は必ずユーザー**。LLM-2 は提案、人が選ぶ（性善説運用なら本人が判断）。
+---
+
+## 品質はどこで担保するか（読込時に移動）
+
+書込時のゲートが効かないぶん、**読込時と継続運用**で担保する。
+これらは質問 Bot 側の責務（一部は実装済み）:
+
+| 仕組み | 内容 | 状態 |
+|--------|------|------|
+| 出典必須 | 回答に必ず GROWI URL を付ける | Phase 1a 実装済 |
+| 更新日表示 | 「このマニュアルは {updated_at} 更新」を回答に添える | 1a プロンプトに追加予定 |
+| 古さ警告 | 一定期間更新がないページは「最新か確認を」と注記 | 追加予定 |
+| 矛盾検出 | 複数ソースが食い違えば両論併記 + 確認を促す | Phase 1a 実装済 |
+| フィードバック | 「この回答は違った」をページ修正につなげる | 運用ルール（将来 UI 化） |
 
 ---
 
 ## ドラフトの扱い
 
-- 登録 Bot が作るページは必ず `status: draft`。
-- Sync Service（Phase 1b）は `status: published` のみ Dify に同期する想定
-  → ドラフトは検索対象に出ない（公開して初めて回答に使われる）。
+- 登録 Bot が作るページは `status: draft`。
+- Sync Service は `status: published` のみ Dify に同期する（draft は検索に出さない）。
   ※ この status フィルタは sync 側の拡張として 1b 検証後に追加する。
 - 公開は人間が GROWI で `status: published` に変更して行う。
 
@@ -111,27 +108,26 @@ HITL（人間確認）は **Wiki 上での編集・公開** で担保する（Di
 | Document Extractor | Dify 標準 | なし |
 | LLM-1 整形 | LLM (Claude) | なし |
 | Knowledge Retrieval | Dify 標準 | Dify Knowledge |
-| LLM-2 判定 | LLM (Claude) | なし |
-| ドラフト作成 | HTTP Request | **docstore-growi の POST/PUT /pages** |
+| ドラフト作成 | HTTP Request | **docstore-growi の POST /pages** |
 
-→ 登録 Bot は Wiki 実装を知らない。**docstore-growi の契約（create/update）だけ**を叩く。
-   Wiki を差し替えても登録 Bot は不変（設計原則どおり）。
+→ 登録 Bot は Wiki 実装を知らない。docstore-growi の契約（create）だけを叩く。
+   LLM-2 判定ノードは廃止したのでさらにシンプル。
 
 ---
 
 ## 未確定・1b 検証後に詰める点
 
 1. **画像・図形を含むファイル**: Phase 2（Vision LLM 前処理）。1c はまずテキスト主体。
-2. **Document Extractor の Word/Excel 抽出品質**: 実ファイルで要確認。
+2. **Document Extractor の Word/Excel 抽出品質**: 実ファイルで要確認（特に表）。
 3. **status フィルタ同期**: sync が draft を除外する拡張。
-4. **GROWI のドラフト表現**: status frontmatter で足りるか、パス分離が要るか。
+4. **質問 Bot への更新日表示・古さ警告の追加**: 1a プロンプト改訂。
 5. **HTTP Request ノードの認証**: docstore-growi を内部ネットワークでどう呼ぶか。
 
 ---
 
 ## 成果物（予定）
 
-- `dify/workflows/phase1c-registration-bot.yml`（Chatflow DSL）
-- `dify/workflows/prompts/llm1-format.md`（整形プロンプト）
-- `dify/workflows/prompts/llm2-dedup.md`（重複判定プロンプト）
-- conventions/（テンプレート・ライティング規約）← 作成済み
+- `dify/workflows/phase1c-registration-bot.yml`（Chatflow DSL、軽量版）
+- `dify/workflows/prompts/llm1-format.md`（整形プロンプト）← 表の平文併記を反映
+- conventions/（テンプレート・ライティング規約）← 改訂済み
+- ~~`prompts/llm2-dedup.md`~~ → 廃止（重複はブロックしないため判定不要）
