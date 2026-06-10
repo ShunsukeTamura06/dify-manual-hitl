@@ -26,11 +26,15 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 
 | Phase | 内容 | 状態 |
 |-------|------|------|
-| 1a | 質問 Bot 単体で RAG 品質を検証（手動でマニュアル投入） | 🟢 進行中 |
-| 1b | Wiki → Dify Knowledge の自動同期 | ⚪ 未着手 |
-| 1c | 登録 Bot（アップロード → 整形 → ドラフト → HITL → 登録） | 🟡 実装完了・実機検証待ち |
+| 1a | 質問 Bot（RAG・出典・矛盾検出） | 🟢 実機検証済 |
+| 1b | Wiki → Dify Knowledge の自動同期 | 🟢 実機検証済 |
+| 1c | 登録 Bot（アップロード → 整形 → GROWI 下書き） | 🟢 実機検証済 |
 | 2  | Vision LLM での画像/図形対応、前処理サービス | ⚪ 未着手 |
 | 3  | 他チームへの展開（Adapter 差し替え） | ⚪ 未着手 |
+
+**Phase 1 全ループを実機で実証済み**（ローカル: GROWI 7.4.2 + Dify 1.9.2 + OpenAI）。
+登録（ファイル→整形→GROWI 下書き）→ 同期 → 質問（出典付き回答・**異なるマニュアル間の
+矛盾を自動検出**）まで通しで動作確認した。検証手順は [local-dev/README.md](local-dev/README.md)。
 
 詳細は [docs/phase-plan.md](docs/phase-plan.md)。
 
