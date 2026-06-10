@@ -19,6 +19,7 @@ version: 0.1.5
 #  インポート後に環境に合わせて調整する箇所:
 #   - llm1 / parameter_extractor ノードのモデル（既定は Anthropic Claude。
 #     OpenAI を使うなら provider=langgenius/openai/openai, name=gpt-4o-mini 等）
+#   - similar_search ノードの dataset_ids（質問 Bot と同じナレッジ ID。重複の気づき用）
 #   - environment_variables の DOCSTORE_URL（下記）
 # ============================================================================
 workflow:
@@ -55,7 +56,10 @@ workflow:
       - {id: e1, source: start, target: doc_extractor, sourceHandle: source, targetHandle: target, type: custom}
       - {id: e2, source: doc_extractor, target: llm1, sourceHandle: source, targetHandle: target, type: custom}
       - {id: e3, source: llm1, target: param_extractor, sourceHandle: source, targetHandle: target, type: custom}
-      - {id: e4, source: param_extractor, target: build_body, sourceHandle: source, targetHandle: target, type: custom}
+      # 重複の「気づき」: 整形後に類似既存ページを検索 → 整形 → 本文組立（ブロックしない）
+      - {id: e4, source: param_extractor, target: similar_search, sourceHandle: source, targetHandle: target, type: custom}
+      - {id: e4b, source: similar_search, target: sim_format, sourceHandle: source, targetHandle: target, type: custom}
+      - {id: e4c, source: sim_format, target: build_body, sourceHandle: source, targetHandle: target, type: custom}
       - {id: e5, source: build_body, target: http_create, sourceHandle: source, targetHandle: target, type: custom}
       - {id: e6, source: http_create, target: answer, sourceHandle: source, targetHandle: target, type: custom}
     nodes:
@@ -154,6 +158,61 @@ workflow:
             与えられた Markdown の frontmatter から path, title, type を抽出してください。
             値が無い場合は空文字にしてください。
 
+      # ── Knowledge Retrieval: 類似既存ページの検索（重複の気づき・ブロックしない）──
+      # 既に公開・同期済みのナレッジに対して、似た内容のページがあるか検索する。
+      # 見つかっても登録は止めない（提示するだけ）。新規 vs 既存更新の判断は人間。
+      - id: similar_search
+        type: custom
+        position: {x: 1060, y: 460}
+        data:
+          type: knowledge-retrieval
+          title: 類似ページ検索
+          query_variable_selector: [param_extractor, title]
+          dataset_ids:
+            - "REPLACE_WITH_YOUR_DATASET_ID"   # 質問 Bot と同じナレッジ ID に
+          retrieval_mode: multiple
+          multiple_retrieval_config:
+            top_k: 3
+            score_threshold_enabled: true
+            score_threshold: 0.4
+            reranking_enable: false
+            reranking_mode: weighted_score
+            weights:
+              weight_type: customized
+              vector_setting: {vector_weight: 1.0, embedding_provider_name: "", embedding_model_name: ""}
+              keyword_setting: {keyword_weight: 0.0}
+
+      # ── Code: 類似ページ結果を人が読める箇条書きに整形 ──
+      - id: sim_format
+        type: custom
+        position: {x: 1330, y: 460}
+        data:
+          type: code
+          title: 類似ページ整形
+          code_language: python3
+          variables:
+            - {variable: items, value_selector: [similar_search, result]}
+          code: |
+            def main(items: list) -> dict:
+                # ドキュメント名は "page_id::タイトル" なので :: 以降を表示
+                seen = {}
+                for r in (items or []):
+                    meta = r.get("metadata", {}) or {}
+                    name = meta.get("document_name", "") or r.get("title", "")
+                    title = name.split("::", 1)[1] if "::" in name else name
+                    score = meta.get("score") or 0
+                    if title and title not in seen:
+                        seen[title] = score
+                if not seen:
+                    return {"text": "（内容が近い既存ページは見つかりませんでした）"}
+                lines = [
+                    f"- {t}（類似度 {round(s * 100)}%）"
+                    for t, s in sorted(seen.items(), key=lambda x: -x[1])
+                ]
+                return {"text": "\n".join(lines)}
+          outputs:
+            text: {type: string}
+
       # ── Code: JSON ボディ組立 ──
       - id: build_body
         type: custom
@@ -218,4 +277,9 @@ workflow:
             内容を確認し、問題なければ GROWI で「公開」してください。
             公開すると次回同期で質問Botに反映されます。
 
-            レスポンス: {{#http_create.body#}}
+            ## 類似ページ（重複の可能性・参考）
+            内容が近い既存ページがあれば、新規ではなく既存の更新を検討してください。
+            {{#sim_format.text#}}
+
+            ---
+            作成結果: {{#http_create.body#}}
