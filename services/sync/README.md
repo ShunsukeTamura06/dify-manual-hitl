@@ -99,7 +99,12 @@ uv run mypy app
 ## 既知の制約
 
 - **Dify API のバージョン差**: `create-by-text` 等のレスポンス形状はバージョンで
-  異なる場合がある。実機接続後に `dify_client.py` の調整が必要になることがある。
+  異なる場合がある。→ **Dify 1.9.2（本番一致）で実機検証済み**。データセット API
+  （`/v1/datasets`, Bearer dataset-key）の create/list/update/delete すべて想定通り動作し、
+  `dify_client.py` は無修正で OK だった。GROWI → docstore-growi → sync → Dify 1.9.2 の
+  一気通貫同期も成功確認済み。
+  （補足: Dify 1.9.2 のコンソール API は HttpOnly クッキー + CSRF に変わったが、
+  sync が使うのはデータセット API なので影響なし）
 - **diff の since 管理**: 現状 since は呼び出し側が渡す。前回同期時刻の永続化は
   運用（cron スクリプト側）または将来の拡張で対応。当面は `full` で代替可能。
 - **削除イベント**: DocStore Adapter 側が削除を検知できるかに依存する
