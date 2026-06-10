@@ -16,8 +16,11 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 - **Wiki 層は差し替え可能**: 現チームは GROWI、他チームには Git+Markdown 等を提供
 - **IA は Diátaxis 4 分類**（Tutorial / How-to / Reference / Explanation）
 - **検索は Hybrid + Rerank + Parent-Child Chunking**（2026 production standard）
+- **特定ベンダー非依存**: Wiki も LLM も差し替え可能。`Wiki + Dify + LLM API キー`
+  さえあれば任意の組織で動く（→ [DEPLOYMENT.md](DEPLOYMENT.md)）
 
 詳細は [docs/architecture.md](docs/architecture.md) を参照。
+デプロイは [DEPLOYMENT.md](DEPLOYMENT.md)、設定項目は [docs/configuration.md](docs/configuration.md)。
 
 そして全体を貫く設計思想は [docs/design-principles.md](docs/design-principles.md)。
 **新しいコンポーネントを追加するときは必ずチェックリストを通すこと。**

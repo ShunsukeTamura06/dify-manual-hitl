@@ -15,12 +15,14 @@
 #   この URL は下の environment で上書きするため .env の DOCSTORE_URL は気にしなくてよい。
 #
 # Dify / GROWI への到達:
-#   いずれも各 .env の URL で指定する。Dify が同一ホストの別 compose にいる場合は
-#   下記いずれかを使う:
-#     (A) .env の DIFY_API_BASE_URL=http://host.docker.internal:5001
-#         （extra_hosts で host-gateway を解決できるようにしてある）
-#     (B) Dify の compose ネットワークに external 参加する
-#         （ファイル末尾の networks のコメントを参照）
+#   各 .env の URL で指定する。
+#
+# ★ 登録 Bot を使うなら重要（実機検証済みの知見）★
+#   登録 Bot の「Wiki に書き込む」HTTP リクエストは Dify の SSRF プロキシ経由で出る。
+#   そのため docstore-growi が「Dify のネットワーク」から到達できる必要がある。
+#   → 確実なのは docstore-growi を Dify のネットワークに参加させること（末尾 networks 参照）。
+#     参加後、Dify 登録 Bot の DOCSTORE_URL は http://docstore-growi:8001 にする。
+#   質問 Bot だけなら sync が Dify に書ければよく、この参加は必須ではない。
 
 name: manual-knowledge-services
 
@@ -79,11 +81,16 @@ networks:
   manual-net:
     driver: bridge
 
-  # (B) Dify の compose ネットワークに参加する場合の例:
-  #   1) Dify 側の compose が作るネットワーク名を確認 (docker network ls)
-  #   2) 下記を有効化し、各 service の networks に dify-net を追加
-  #   3) .env の DIFY_API_BASE_URL=http://docker-api-1:5001 など Dify のサービス名に
+  # ── Dify のネットワークに参加する（登録 Bot を使うなら推奨）──
+  #   手順:
+  #   1) Dify 側のネットワーク名を確認:  docker network ls | grep -i ssrf
+  #      （Dify の HTTP リクエストが通る SSRF プロキシのネットワーク。
+  #        公式 compose では docker_ssrf_proxy_network 等）
+  #   2) 下の dify_net の name を、確認したネットワーク名に合わせる
+  #   3) 各 service の networks: に - dify_net を追加
+  #   4) Dify 登録 Bot の DOCSTORE_URL を http://docstore-growi:8001 に
+  #   5) sync の DIFY_API_BASE_URL は Dify のサービス名で到達（例 http://nginx）
   #
-  # dify-net:
+  # dify_net:
   #   external: true
-  #   name: docker_default   # ← 実際の Dify ネットワーク名に置き換え
+  #   name: docker_ssrf_proxy_network   # ← 実際の Dify ネットワーク名に置き換え
