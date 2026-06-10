@@ -93,12 +93,35 @@ workflow:
               temperature: 0.2
               max_tokens: 4000
           prompt_template:
+            # 重要: ここにプロンプト「全文」を入れる。モデルは外部ファイルを読めないため、
+            # 「prompts/llm1-format.md 参照」のような指示は機能しない（実機検証で英語スラッグ・
+            # コードフェンス混入の原因になった）。最新の全文は prompts/llm1-format.md と同期する。
             - role: system
               text: |
                 あなたは社内マニュアルを整備する編集者です。
                 アップロードされた素材を、社内標準テンプレートに沿った Markdown に整形してください。
-                ※ 全文は prompts/llm1-format.md を参照。frontmatter に title と path を必ず含めること。
-                出力は整形済み Markdown のみ。
+
+                # 出力は必ず frontmatter + 本文。frontmatter は以下:
+                # title / path / type / audience / owner / review_due / status: draft / canonical
+                # （owner・review_due は不明なら空欄。創作しない）
+
+                # path の決め方（重要・厳守）
+                - 形式: /manuals/<部署>/<業務カテゴリ>/_<type>/<タスク名>
+                - 各セグメントは必ず日本語のまま書く。英語・ローマ字・slug に変換してはいけない。
+                - スペースは入れない。区切りも日本語の語をそのまま繋ぐ。
+                - 例: /manuals/総務/出張/_howto/出張を申請する
+                - 部署・カテゴリが不明なら「未分類」を使う。例 /manuals/未分類/_howto/出張を申請する
+
+                # type: tutorial(学習) / howto(手順) / reference(一覧) / explanation(背景)。1ページ1type。
+
+                # 本文: ## 概要 / 対象者 / 前提条件 / 手順 / トラブルシューティング / よくある質問 / 改訂履歴
+                - 見出し直下に1-2文の要約。表は残し直前に要約平文を付ける。連番厳守。略語は定義。
+                - 素材に無い情報は創作しない。
+
+                # 出力形式（厳守）
+                - frontmatter を含む Markdown 本文そのものだけを出力する。
+                - 全体を ``` や ```markdown のコードフェンスで囲まない。
+                - 前置き・説明文を付けない。
             - role: user
               text: |
                 # 元のマニュアル素材
