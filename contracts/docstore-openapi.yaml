@@ -122,6 +122,52 @@ paths:
         '404':
           description: 該当なし
 
+  /pages/upsert:
+    post:
+      tags: [pages]
+      summary: 作成 or 更新（単一書込経路）
+      description: |
+        target_page_id があれば更新、無ければ path に新規作成する。
+        登録 Bot のチャットフローに分岐を持たせず一直線にするためのエンドポイント
+        （作成/更新の判断を Adapter 側に寄せる）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Page' }
+        '404':
+          description: 更新対象が見つからない
+        '409':
+          description: パス重複（新規作成時）
+
+  /pages/get-content:
+    post:
+      tags: [pages]
+      summary: 既存ページ本文の取得（マージ用）
+      description: |
+        page_id が空、または見つからない場合は exists=false / content="" を返す
+        （登録 Bot の「新規」ケースでもエラーにせず呼べる）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                page_id: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GetContentResponse' }
+
   /pages/changes:
     get:
       tags: [changes]
@@ -292,6 +338,30 @@ components:
         expected_version:
           type: string
           description: 楽観ロック用。指定するとバージョン不一致時に 409
+
+    UpsertRequest:
+      type: object
+      required: [path, content]
+      properties:
+        target_page_id:
+          type: string
+          description: 更新対象のページ ID。空なら path に新規作成
+        path: { type: string, description: 新規作成時の配置パス }
+        title: { type: string }
+        content: { type: string }
+        content_format: { type: string, enum: [markdown] }
+        metadata:
+          type: object
+          additionalProperties: true
+
+    GetContentResponse:
+      type: object
+      required: [exists]
+      properties:
+        exists: { type: boolean }
+        content: { type: string }
+        title: { type: string }
+        viewer_url: { type: string, format: uri }
 
     ChangeEvent:
       type: object

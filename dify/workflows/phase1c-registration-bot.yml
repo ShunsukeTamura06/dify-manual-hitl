@@ -1,3 +1,15 @@
+# マニュアル登録Bot (Phase 1c) — Dify 1.9.2 実機検証済みの DSL
+# ファイル添付 → 整形 → 類似ページ提示 → (新規 or 既存マージ更新) → GROWI 書込。
+# この DSL は実機の Dify からエクスポートしたもの（register→merge更新まで動作確認済み）。
+#
+# インポート後に環境へ合わせる箇所:
+#  - LLM ノード(整形/項目抽出/更新判定/統合)のモデル（既定 gpt-4o-mini。任意の LLM に）
+#  - 類似ページ検索ノードの dataset_ids（REPLACE_WITH_YOUR_DATASET_ID を質問Botと同じナレッジに）
+#  - environment_variables の DOCSTORE_URL（Adapter の到達 URL。Dify と同ネットワークなら http://docstore-growi:8001）
+#
+# 更新フローは作成/更新の分岐をアダプタ POST /pages/upsert に寄せ、チャットフローは一直線。
+# 既存ページ更新時は get-content で取得 → LLM が新旧をマージ → upsert(PUT)。
+
 app:
   description: マニュアル登録Bot (Phase 1c). ファイルを整形して GROWI に下書き作成する。
   icon: 📝
@@ -5,281 +17,628 @@ app:
   mode: advanced-chat
   name: マニュアル登録Bot
   use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/openai:0.4.2@21195ee1321849e0a7d4b3f6b2fd8c2be23ea6c7182e1b444ecc4c1711b52468
+    version: null
 kind: app
-version: 0.1.5
-# ============================================================================
-# 注意:
-#  Dify 1.9.2 で DSL インポート → 起動まで実機検証済み（completed-with-warnings で
-#  インポートでき、本ファイルの反映済み修正で正常動作する）。
-#  検証時に判明した 1.9.2 必須フィールドは本ファイルに反映済み:
-#   - parameter-extractor: reasoning_mode
-#   - code: outputs は辞書形式
-#   - http-request: authorization
-#
-#  インポート後に環境に合わせて調整する箇所:
-#   - llm1 / parameter_extractor ノードのモデル（既定は Anthropic Claude。
-#     OpenAI を使うなら provider=langgenius/openai/openai, name=gpt-4o-mini 等）
-#   - similar_search ノードの dataset_ids（質問 Bot と同じナレッジ ID。重複の気づき用）
-#   - environment_variables の DOCSTORE_URL（下記）
-# ============================================================================
+version: 0.4.0
 workflow:
   conversation_variables: []
   environment_variables:
-    # docstore-growi の到達 URL。
-    # Dify と同じ docker ネットワークにコンテナ配置するなら http://docstore-growi:8001
-    # （Dify の HTTP ノードは ssrf_proxy 経由。コンテナ名で到達でき検証済み）。
-    # ホストで uvicorn 起動なら http://host.docker.internal:8001
-    - name: DOCSTORE_URL
-      value: http://docstore-growi:8001
-      value_type: string
+  - description: ''
+    id: 1174e719-482b-4749-aead-1056eb332db0
+    name: DOCSTORE_URL
+    selector:
+    - env
+    - DOCSTORE_URL
+    value: http://docstore-growi:8001
+    value_type: string
   features:
     file_upload:
-      enabled: true
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
       allowed_file_types:
-        - document
+      - document
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: true
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
       number_limits: 1
-    opening_statement: |
-      整備したいマニュアル（Word/Excel/PDF）を添付し、
+    opening_statement: '整備したいマニュアル（Word/Excel/PDF）を添付し、
+
       補足があればメッセージに書いて送ってください。
+
       整形して GROWI に下書きを作成します。
+
+      '
     retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
       enabled: false
     suggested_questions: []
     suggested_questions_after_answer:
       enabled: false
-    speech_to_text:
-      enabled: false
     text_to_speech:
       enabled: false
+      language: ''
+      voice: ''
   graph:
     edges:
-      - {id: e1, source: start, target: doc_extractor, sourceHandle: source, targetHandle: target, type: custom}
-      - {id: e2, source: doc_extractor, target: llm1, sourceHandle: source, targetHandle: target, type: custom}
-      - {id: e3, source: llm1, target: param_extractor, sourceHandle: source, targetHandle: target, type: custom}
-      # 重複の「気づき」: 整形後に類似既存ページを検索 → 整形 → 本文組立（ブロックしない）
-      - {id: e4, source: param_extractor, target: similar_search, sourceHandle: source, targetHandle: target, type: custom}
-      - {id: e4b, source: similar_search, target: sim_format, sourceHandle: source, targetHandle: target, type: custom}
-      - {id: e4c, source: sim_format, target: build_body, sourceHandle: source, targetHandle: target, type: custom}
-      - {id: e5, source: build_body, target: http_create, sourceHandle: source, targetHandle: target, type: custom}
-      - {id: e6, source: http_create, target: answer, sourceHandle: source, targetHandle: target, type: custom}
+    - data:
+        sourceType: start
+        targetType: document-extractor
+      id: e1
+      source: start
+      sourceHandle: source
+      target: doc_extractor
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: document-extractor
+        targetType: llm
+      id: e2
+      source: doc_extractor
+      sourceHandle: source
+      target: llm1
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: llm
+        targetType: parameter-extractor
+      id: e3
+      source: llm1
+      sourceHandle: source
+      target: param_extractor
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: parameter-extractor
+        targetType: knowledge-retrieval
+      id: e_pe_ss
+      source: param_extractor
+      sourceHandle: source
+      target: similar_search
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: knowledge-retrieval
+        targetType: code
+      id: e_ss_sf
+      source: similar_search
+      sourceHandle: source
+      target: sim_format
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: code
+        targetType: llm
+      id: e_sim_format_route_llm
+      source: sim_format
+      sourceHandle: source
+      target: route_llm
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: llm
+        targetType: code
+      id: e_route_llm_route_parse
+      source: route_llm
+      sourceHandle: source
+      target: route_parse
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: code
+        targetType: http-request
+      id: e_route_parse_http_getcontent
+      source: route_parse
+      sourceHandle: source
+      target: http_getcontent
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: http-request
+        targetType: llm
+      id: e_http_getcontent_merge_llm
+      source: http_getcontent
+      sourceHandle: source
+      target: merge_llm
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: llm
+        targetType: code
+      id: e_merge_llm_build_upsert
+      source: merge_llm
+      sourceHandle: source
+      target: build_upsert
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: code
+        targetType: http-request
+      id: e_build_upsert_http_upsert
+      source: build_upsert
+      sourceHandle: source
+      target: http_upsert
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: http-request
+        targetType: answer
+      id: e_http_upsert_answer
+      source: http_upsert
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
     nodes:
-      # ── Start（ファイルアップロード）──
-      - id: start
-        type: custom
-        position: {x: 80, y: 282}
-        data:
-          type: start
-          title: 開始
-          variables: []
+    - data:
+        title: 開始
+        type: start
+        variables: []
+      height: 52
+      id: start
+      position:
+        x: 80
+        y: 282
+      positionAbsolute:
+        x: 80
+        y: 282
+      type: custom
+      width: 242
+    - data:
+        is_array_file: true
+        title: ファイル抽出
+        type: document-extractor
+        variable_selector:
+        - sys
+        - files
+      height: 92
+      id: doc_extractor
+      position:
+        x: 360
+        y: 282
+      positionAbsolute:
+        x: 360
+        y: 282
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            max_tokens: 4000
+            temperature: 0.2
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: 'あなたは社内マニュアルを整備する編集者です。
 
-      # ── Document Extractor ──
-      - id: doc_extractor
-        type: custom
-        position: {x: 360, y: 282}
-        data:
-          type: document-extractor
-          title: ファイル抽出
-          variable_selector: [sys, files]
-          is_array_file: true
+            アップロードされた素材を、社内標準テンプレートに沿った Markdown に整形してください。
 
-      # ── LLM-1: 整形 ──
-      - id: llm1
-        type: custom
-        position: {x: 640, y: 282}
-        data:
-          type: llm
-          title: 整形 (LLM-1)
-          model:
-            provider: anthropic
-            name: claude-sonnet-4-5-20250929   # 利用可能な Claude モデルに
-            mode: chat
-            completion_params:
-              temperature: 0.2
-              max_tokens: 4000
-          prompt_template:
-            # 重要: ここにプロンプト「全文」を入れる。モデルは外部ファイルを読めないため、
-            # 「prompts/llm1-format.md 参照」のような指示は機能しない（実機検証で英語スラッグ・
-            # コードフェンス混入の原因になった）。最新の全文は prompts/llm1-format.md と同期する。
-            - role: system
-              text: |
-                あなたは社内マニュアルを整備する編集者です。
-                アップロードされた素材を、社内標準テンプレートに沿った Markdown に整形してください。
 
-                # 出力は必ず frontmatter + 本文。frontmatter は以下:
-                # title / path / type / audience / owner / review_due / status: draft / canonical
-                # （owner・review_due は不明なら空欄。創作しない）
-
-                # path の決め方（重要・厳守）
-                - 形式: /manuals/<部署>/<業務カテゴリ>/_<type>/<タスク名>
-                - 各セグメントは必ず日本語のまま書く。英語・ローマ字・slug に変換してはいけない。
-                - スペースは入れない。区切りも日本語の語をそのまま繋ぐ。
-                - 例: /manuals/総務/出張/_howto/出張を申請する
-                - 部署・カテゴリが不明なら「未分類」を使う。例 /manuals/未分類/_howto/出張を申請する
-
-                # type: tutorial(学習) / howto(手順) / reference(一覧) / explanation(背景)。1ページ1type。
-
-                # 本文: ## 概要 / 対象者 / 前提条件 / 手順 / トラブルシューティング / よくある質問 / 改訂履歴
-                - 見出し直下に1-2文の要約。表は残し直前に要約平文を付ける。連番厳守。略語は定義。
-                - 素材に無い情報は創作しない。
-
-                # 出力形式（厳守）
-                - frontmatter を含む Markdown 本文そのものだけを出力する。
-                - 全体を ``` や ```markdown のコードフェンスで囲まない。
-                - 前置き・説明文を付けない。
-            - role: user
-              text: |
-                # 元のマニュアル素材
-                {{#doc_extractor.text#}}
-
-                # ユーザーからの補足
-                {{#sys.query#}}
-          context: {enabled: false, variable_selector: []}
-          vision: {enabled: false}
-
-      # ── Parameter Extractor: path/title/type ──
-      - id: param_extractor
-        type: custom
-        position: {x: 920, y: 282}
-        data:
-          type: parameter-extractor
-          title: 項目抽出
-          reasoning_mode: prompt   # Dify 1.9.2 で必須
-          model:
-            provider: anthropic
-            name: claude-sonnet-4-5-20250929
-            mode: chat
-            completion_params: {temperature: 0}
-          query: [llm1, text]
-          parameters:
-            - {name: path, type: string, required: true, description: frontmatter の path（GROWI 配置パス）}
-            - {name: title, type: string, required: true, description: frontmatter の title}
-            - {name: type, type: string, required: false, description: frontmatter の type}
-          instruction: |
-            与えられた Markdown の frontmatter から path, title, type を抽出してください。
-            値が無い場合は空文字にしてください。
-
-      # ── Knowledge Retrieval: 類似既存ページの検索（重複の気づき・ブロックしない）──
-      # 既に公開・同期済みのナレッジに対して、似た内容のページがあるか検索する。
-      # 見つかっても登録は止めない（提示するだけ）。新規 vs 既存更新の判断は人間。
-      - id: similar_search
-        type: custom
-        position: {x: 1060, y: 460}
-        data:
-          type: knowledge-retrieval
-          title: 類似ページ検索
-          query_variable_selector: [param_extractor, title]
-          dataset_ids:
-            - "REPLACE_WITH_YOUR_DATASET_ID"   # 質問 Bot と同じナレッジ ID に
-          retrieval_mode: multiple
-          multiple_retrieval_config:
-            top_k: 3
-            score_threshold_enabled: true
-            score_threshold: 0.4
-            reranking_enable: false
-            reranking_mode: weighted_score
-            weights:
-              weight_type: customized
-              vector_setting: {vector_weight: 1.0, embedding_provider_name: "", embedding_model_name: ""}
-              keyword_setting: {keyword_weight: 0.0}
-
-      # ── Code: 類似ページ結果を人が読める箇条書きに整形 ──
-      - id: sim_format
-        type: custom
-        position: {x: 1330, y: 460}
-        data:
-          type: code
-          title: 類似ページ整形
-          code_language: python3
-          variables:
-            - {variable: items, value_selector: [similar_search, result]}
-          code: |
-            def main(items: list) -> dict:
-                # ドキュメント名は "page_id::タイトル" なので :: 以降を表示
-                seen = {}
-                for r in (items or []):
-                    meta = r.get("metadata", {}) or {}
-                    name = meta.get("document_name", "") or r.get("title", "")
-                    title = name.split("::", 1)[1] if "::" in name else name
-                    score = meta.get("score") or 0
-                    if title and title not in seen:
-                        seen[title] = score
-                if not seen:
-                    return {"text": "（内容が近い既存ページは見つかりませんでした）"}
-                lines = [
-                    f"- {t}（類似度 {round(s * 100)}%）"
-                    for t, s in sorted(seen.items(), key=lambda x: -x[1])
-                ]
-                return {"text": "\n".join(lines)}
-          outputs:
-            text: {type: string}
-
-      # ── Code: JSON ボディ組立 ──
-      - id: build_body
-        type: custom
-        position: {x: 1200, y: 282}
-        data:
-          type: code
-          title: ボディ組立
-          code_language: python3
-          variables:
-            - {variable: path, value_selector: [param_extractor, path]}
-            - {variable: title, value_selector: [param_extractor, title]}
-            - {variable: type_, value_selector: [param_extractor, type]}
-            - {variable: content, value_selector: [llm1, text]}
-          code: |
-            import json
-
-            def main(path: str, title: str, type_: str, content: str) -> dict:
-                # content には LLM-1 が作った frontmatter（status: draft 等）が
-                # 既に含まれる。metadata を別送すると frontmatter が二重になるため、
-                # metadata は空にし、content の frontmatter を正とする。
-                # アダプタは読み出し時に frontmatter を metadata に復元する（往復一致）。
-                body = json.dumps(
-                    {
-                        "path": path,
-                        "title": title,
-                        "content": content,
-                        "metadata": {},
-                    },
-                    ensure_ascii=False,
-                )
-                return {"body": body}
-          # Dify 1.9.2 では outputs は辞書形式
-          outputs:
-            body: {type: string}
-
-      # ── HTTP Request: POST /pages ──
-      - id: http_create
-        type: custom
-        position: {x: 1480, y: 282}
-        data:
-          type: http-request
-          title: GROWI下書き作成
-          method: post
-          url: '{{#env.DOCSTORE_URL#}}/pages'
-          authorization: {type: no-auth, config: null}   # Dify 1.9.2 で必須
-          headers: 'Content-Type:application/json'
-          params: ''
-          body:
-            type: raw-text
-            data: '{{#build_body.body#}}'
-          timeout: {max_connect_timeout: 10, max_read_timeout: 60, max_write_timeout: 60}
-
-      # ── Answer ──
-      - id: answer
-        type: custom
-        position: {x: 1760, y: 282}
-        data:
-          type: answer
-          title: 完了通知
-          answer: |
-            GROWI に下書きを作成しました（status: draft）。
-            内容を確認し、問題なければ GROWI で「公開」してください。
-            公開すると次回同期で質問Botに反映されます。
-
-            ## 類似ページ（重複の可能性・参考）
-            内容が近い既存ページがあれば、新規ではなく既存の更新を検討してください。
-            {{#sim_format.text#}}
+            # 出力は必ず frontmatter + 本文。frontmatter は以下:
 
             ---
-            作成結果: {{#http_create.body#}}
+
+            title: 動詞+目的語のタイトル（reference/explanation は名詞可）
+
+            path: 下の「path の決め方」に従う
+
+            type: tutorial | howto | reference | explanation
+
+            audience: 対象者（不明なら 全社）
+
+            owner:
+
+            review_due:
+
+            status: draft
+
+            canonical: false
+
+            ---
+
+
+            # path の決め方（重要・厳守）
+
+            - 形式: /manuals/<部署>/<業務カテゴリ>/_<type>/<タスク名>
+
+            - 各セグメントは必ず日本語のまま書く。英語・ローマ字・slug に変換してはいけない。
+
+            - スペースは入れない（区切りも日本語の語をそのまま繋ぐ）。
+
+            - 例: /manuals/総務/出張/_howto/出張を申請する
+
+            - 部署・カテゴリが不明なら「未分類」を使う。例 /manuals/未分類/_howto/出張を申請する
+
+
+            # 本文
+
+            ## 概要（1-3文）/ ## 対象者 / ## 前提条件 / ## 手順 / ## トラブルシューティング / ## よくある質問 / ##
+            改訂履歴
+
+            - 見出し直下に1-2文の要約。表は残し直前に要約平文を付ける。連番厳守。略語は定義。
+
+            - 素材に無い情報は創作しない。owner/review_due は不明なら空欄。
+
+
+            # 出力形式（厳守）
+
+            - frontmatter を含む Markdown 本文そのものだけを出力する。
+
+            - 全体を ``` や ```markdown のコードフェンスで囲まない。
+
+            - 前置き・説明文を付けない。
+
+            '
+        - role: user
+          text: '# 元のマニュアル素材
+
+            {{#doc_extractor.text#}}
+
+
+            # ユーザーからの補足
+
+            {{#sys.query#}}
+
+            '
+        title: 整形 (LLM-1)
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: llm1
+      position:
+        x: 640
+        y: 282
+      positionAbsolute:
+        x: 640
+        y: 282
+      type: custom
+      width: 242
+    - data:
+        instruction: '与えられた Markdown の frontmatter から path, title, type を抽出してください。
+
+          値が無い場合は空文字にしてください。
+
+          '
+        model:
+          completion_params:
+            temperature: 0
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        parameters:
+        - description: frontmatter の path（GROWI 配置パス）
+          name: path
+          required: true
+          type: string
+        - description: frontmatter の title
+          name: title
+          required: true
+          type: string
+        - description: frontmatter の type
+          name: type
+          required: false
+          type: string
+        query:
+        - llm1
+        - text
+        reasoning_mode: prompt
+        title: 項目抽出
+        type: parameter-extractor
+      height: 88
+      id: param_extractor
+      position:
+        x: 920
+        y: 282
+      positionAbsolute:
+        x: 920
+        y: 282
+      type: custom
+      width: 242
+    - data:
+        answer: '処理が完了しました（status: draft）。GROWI で確認・公開してください。
+
+
+          ## 類似ページ（重複の可能性・参考）
+
+          {{#sim_format.text#}}
+
+
+          ---
+
+          結果: {{#http_upsert.body#}}'
+        title: 完了通知
+        type: answer
+      height: 183
+      id: answer
+      position:
+        x: 1760
+        y: 282
+      positionAbsolute:
+        x: 1760
+        y: 282
+      type: custom
+      width: 242
+    - data:
+        dataset_ids:
+        - S0nYaYbe1DHkjfH5U6D5w4pA61DRnyluxbefZo6ujFnrilynfgF6N7Zp6B2MQzmp
+        multiple_retrieval_config:
+          reranking_enable: false
+          reranking_mode: weighted_score
+          score_threshold: 0.4
+          score_threshold_enabled: true
+          top_k: 3
+          weights:
+            keyword_setting:
+              keyword_weight: 0
+            vector_setting:
+              embedding_model_name: ''
+              embedding_provider_name: ''
+              vector_weight: 1
+            weight_type: customized
+        query_variable_selector:
+        - param_extractor
+        - title
+        retrieval_mode: multiple
+        title: 類似ページ検索
+        type: knowledge-retrieval
+      id: similar_search
+      position:
+        x: 1060
+        y: 460
+      positionAbsolute:
+        x: 1060
+        y: 460
+      type: custom
+    - data:
+        code: "\ndef main(items: list) -> dict:\n    seen = {}\n    for r in (items\
+          \ or []):\n        meta = r.get(\"metadata\", {}) or {}\n        name =\
+          \ meta.get(\"document_name\", \"\") or r.get(\"title\", \"\")\n        title\
+          \ = name.split(\"::\", 1)[1] if \"::\" in name else name\n        score\
+          \ = meta.get(\"score\") or 0\n        if title and title not in seen:\n\
+          \            seen[title] = score\n    if not seen:\n        return {\"text\"\
+          : \"（内容が近い既存ページは見つかりませんでした）\"}\n    lines = []\n    for t, s in sorted(seen.items(),\
+          \ key=lambda x: -x[1]):\n        lines.append(f\"- {t}（類似度 {round(s*100)}%）\"\
+          )\n    return {\"text\": \"\\n\".join(lines)}\n"
+        code_language: python3
+        outputs:
+          text:
+            type: string
+        title: 類似ページ整形
+        type: code
+        variables:
+        - value_selector:
+          - similar_search
+          - result
+          variable: items
+      id: sim_format
+      position:
+        x: 1330
+        y: 460
+      positionAbsolute:
+        x: 1330
+        y: 460
+      type: custom
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            max_tokens: 4000
+            temperature: 0
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: 'ユーザーのメッセージと『類似既存ページ一覧』から、これは新規作成か既存ページの更新かを判定する。
+
+            ユーザーが既存ページの更新を意図している場合のみ action=update とし、そのページのタイトルを target_title に入れる。
+
+            明示が無ければ action=new。
+
+            出力は JSON のみ: {"action":"new|update","target_title":"..."}。前後に文を付けない。'
+        - role: user
+          text: 'メッセージ:
+
+            {{#sys.query#}}
+
+
+            類似既存ページ（document_name は ''ID::タイトル'' 形式）:
+
+            {{#similar_search.result#}}'
+        title: 更新対象の判定
+        type: llm
+        vision:
+          enabled: false
+      id: route_llm
+      position:
+        x: 1600
+        y: 460
+      type: custom
+    - data:
+        code: "\nimport json\ndef main(route_json: str, items: list) -> dict:\n  \
+          \  s = (route_json or \"\").strip()\n    if s.startswith(\"```\"):\n   \
+          \     s = s.split(\"```\")[1].replace(\"json\", \"\", 1).strip()\n    try:\n\
+          \        r = json.loads(s)\n    except Exception:\n        r = {}\n    action\
+          \ = (r.get(\"action\") or \"new\").strip()\n    target_title = (r.get(\"\
+          target_title\") or \"\").strip()\n    pid = \"\"\n    if action == \"update\"\
+          \ and target_title:\n        for it in (items or []):\n            meta\
+          \ = it.get(\"metadata\", {}) or {}\n            name = meta.get(\"document_name\"\
+          , \"\")\n            if \"::\" in name:\n                p, t = name.split(\"\
+          ::\", 1)\n                if t.strip() == target_title or target_title in\
+          \ t:\n                    pid = p\n                    break\n    return\
+          \ {\"target_page_id\": pid}\n"
+        code_language: python3
+        outputs:
+          target_page_id:
+            type: string
+        title: 対象ID解決
+        type: code
+        variables:
+        - value_selector:
+          - route_llm
+          - text
+          variable: route_json
+        - value_selector:
+          - similar_search
+          - result
+          variable: items
+      id: route_parse
+      position:
+        x: 1860
+        y: 460
+      type: custom
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{"page_id": "{{#route_parse.target_page_id#}}"}'
+          type: raw-text
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        title: 既存本文の取得
+        type: http-request
+        url: '{{#env.DOCSTORE_URL#}}/pages/get-content'
+      id: http_getcontent
+      position:
+        x: 2120
+        y: 460
+      type: custom
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            max_tokens: 4000
+            temperature: 0.2
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: '既存ページの本文（JSONの content フィールド。空なら新規）と、新しい素材から、統合した最終マニュアルを作る。
+
+            - 既存が空なら新素材をそのまま整える。
+
+            - 既存があれば、新素材の情報を既存の構造に溶け込ませる（重複は1つに、矛盾は新素材を優先しつつ注記）。
+
+            - frontmatter を含む Markdown 本文そのものだけを出力。``` で囲まない。status: draft にする。'
+        - role: user
+          text: '既存ページ(JSON):
+
+            {{#http_getcontent.body#}}
+
+
+            新しい素材(整形済み):
+
+            {{#llm1.text#}}'
+        title: 統合(マージ)
+        type: llm
+        vision:
+          enabled: false
+      id: merge_llm
+      position:
+        x: 2380
+        y: 460
+      type: custom
+    - data:
+        code: "\nimport json\ndef main(target_page_id: str, path: str, title: str,\
+          \ content: str) -> dict:\n    body = json.dumps({\n        \"target_page_id\"\
+          : target_page_id or \"\",\n        \"path\": path, \"title\": title,\n \
+          \       \"content\": content, \"metadata\": {},\n    }, ensure_ascii=False)\n\
+          \    return {\"body\": body}\n"
+        code_language: python3
+        outputs:
+          body:
+            type: string
+        title: upsertボディ組立
+        type: code
+        variables:
+        - value_selector:
+          - route_parse
+          - target_page_id
+          variable: target_page_id
+        - value_selector:
+          - param_extractor
+          - path
+          variable: path
+        - value_selector:
+          - param_extractor
+          - title
+          variable: title
+        - value_selector:
+          - merge_llm
+          - text
+          variable: content
+      id: build_upsert
+      position:
+        x: 2640
+        y: 460
+      type: custom
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{{#build_upsert.body#}}'
+          type: raw-text
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        title: GROWI作成/更新
+        type: http-request
+        url: '{{#env.DOCSTORE_URL#}}/pages/upsert'
+      id: http_upsert
+      position:
+        x: 2900
+        y: 460
+      type: custom
+    viewport:
+      x: -780
+      y: -175
+      zoom: 1
+  rag_pipeline_variables: []

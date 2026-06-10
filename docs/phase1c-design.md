@@ -90,7 +90,12 @@
 - `POST /pages/upsert`: target_page_id があれば更新(PUT)、無ければ新規(POST)
 - `POST /pages/get-content`: 既存本文を返す（page_id 空は空文字 = 新規でも呼べる）
 
-### Stage2（未実装）— チャットフロー（一直線で追加）
+### Stage2（実装・実機検証済み）— チャットフロー（一直線で追加）
+実 Dify 1.9.2 + 実 GROWI で検証済み。既存「備品購入を申請する」に新素材を渡し
+「○○を更新」と指示 → 対象 page_id を解決 → 既存取得 → **LLM が新旧をマージ**
+→ upsert(PUT, status 200) で既存ページを更新。旧情報と新情報が両方残ることを確認。
+DSL は dify/workflows/phase1c-registration-bot.yml（実機からエクスポート）。
+
 ```
 ... 整形(LLM-1) → 類似検索 → 類似整形
   → ルーティングLLM: sys.query と類似ページから「更新対象 page_id」を判定（無ければ空）
