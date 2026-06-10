@@ -44,6 +44,9 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 │   ├── design-principles.md   # 設計原則（疎結合・交換可能）
 │   ├── phase-plan.md          # フェーズ計画
 │   └── research-notes.md      # ベストプラクティス調査メモ
+├── local-dev/                 # この PC でフルスタック（Dify+GROWI+services）を動かす
+│   ├── README.md              # 起動手順・ネットワーク・バージョン方針
+│   └── docker-compose.growi.yml # ローカル GROWI（ES なしで軽量）
 ├── contracts/                 # コンポーネント間の契約（OpenAPI 等）
 │   └── docstore-openapi.yaml  # DocStore Adapter API 仕様
 ├── services/                  # Dify とは独立した HTTP サービス群

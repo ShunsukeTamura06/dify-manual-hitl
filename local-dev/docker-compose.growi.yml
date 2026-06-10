@@ -1,0 +1,47 @@
+# ローカル開発用 GROWI スタック
+#
+# 本番の GROWI バージョンに合わせて GROWI_VERSION を設定する。
+# Elasticsearch は使わない（軽量化。全文検索は Dify が担うため不要）。
+#
+# 起動:
+#   cd local-dev
+#   GROWI_VERSION=<本番と同じバージョン> docker compose -f docker-compose.growi.yml up -d
+#
+# 初回アクセス: http://localhost:3000 で管理者アカウントを作成し、
+#   個人設定 → API 設定 で API Token を発行（docstore-growi の .env に設定）
+
+name: manual-local-growi
+
+services:
+  growi:
+    image: weseek/growi:${GROWI_VERSION:-7.1.7}   # ← 本番バージョンに合わせる
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongo
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/growi
+      - APP_SITE_URL=http://localhost:3000
+      - FILE_UPLOAD=local
+      # Elasticsearch を無効化（ELASTICSEARCH_URI を設定しない）
+      # → 全文検索は無効になるが、本システムは Dify 側で検索するため問題なし
+    networks:
+      - growi-net
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:6.0
+    networks:
+      - growi-net
+    volumes:
+      - growi-mongo:/data/db
+      - growi-mongo-config:/data/configdb
+    restart: unless-stopped
+
+volumes:
+  growi-mongo:
+  growi-mongo-config:
+
+networks:
+  growi-net:
+    driver: bridge
