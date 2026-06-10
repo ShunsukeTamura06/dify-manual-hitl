@@ -159,6 +159,51 @@ def test_create_page_sends_frontmatter_body(client: TestClient) -> None:
 
 
 @respx.mock
+def test_create_page_with_frontmatter_content_no_double(client: TestClient) -> None:
+    """登録 Bot の送り方を再現: content に frontmatter 込み、metadata は空。
+
+    frontmatter が二重にならず、content がそのまま GROWI に渡ることを保証する。
+    """
+    route = respx.post(f"{GROWI_BASE}/_api/v3/pages").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "page": {
+                    "_id": "new-id",
+                    "path": "/manuals/経理/経費精算/_howto/国内出張の経費を精算する",
+                    "updatedAt": "2026-06-10T00:00:00.000Z",
+                    "revision": {"_id": "rev1", "body": "x"},
+                }
+            },
+        )
+    )
+    content = (
+        "---\n"
+        "title: 国内出張の経費を精算する\n"
+        "type: howto\n"
+        "status: draft\n"
+        "---\n"
+        "# 国内出張の経費を精算する\n\n## 概要\n手順です。"
+    )
+
+    resp = client.post(
+        "/pages",
+        json={
+            "path": "/manuals/経理/経費精算/_howto/国内出張の経費を精算する",
+            "title": "国内出張の経費を精算する",
+            "content": content,
+            "metadata": {},  # 空。content の frontmatter が正
+        },
+    )
+    assert resp.status_code == 201
+    sent_body = route.calls[0].request.content.decode()
+    # frontmatter 区切り --- は 2 本だけ（二重frontmatterになっていない）
+    assert sent_body.count("---") == 2
+    assert "title: 国内出張の経費を精算する" in sent_body
+    assert "status: draft" in sent_body
+
+
+@respx.mock
 def test_health_reports_growi_reachable(client: TestClient) -> None:
     respx.get(f"{GROWI_BASE}/_api/v3/healthcheck").mock(
         return_value=httpx.Response(200, json={"status": "ok"})

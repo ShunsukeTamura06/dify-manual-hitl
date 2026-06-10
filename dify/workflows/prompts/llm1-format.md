@@ -20,6 +20,7 @@ Dify の LLM ノードの system プロンプトに埋め込む。
 
 ---
 title: （動詞+目的語。reference/explanation は名詞可）
+path: （GROWI 上の配置パス。/manuals/<部署>/<業務カテゴリ>/_<type>/<タスク名> 形式）
 type: （tutorial | howto | reference | explanation のいずれか）
 audience: （対象者。不明なら「全社」）
 owner: （責任者メール。素材から不明なら空欄のままにする）
@@ -42,6 +43,12 @@ source_files: [（元ファイル名があれば）]
 ## よくある質問
 ## 関連ページ
 ## 改訂履歴
+
+# path の決め方
+- 形式: /manuals/<部署>/<業務カテゴリ>/_<type>/<タスク名>
+- 例: /manuals/経理/経費精算/_howto/国内出張の経費を精算する
+- 部署・カテゴリが素材から不明なら、推定できる範囲で埋め、不明部分は「未分類」とする。
+- タスク名は title と揃える。スペースや記号は避け、日本語タイトルそのままでよい。
 
 # type の判定基準
 - tutorial: 初学者を手取り足取り導く学習用

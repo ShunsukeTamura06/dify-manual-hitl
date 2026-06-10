@@ -1,0 +1,189 @@
+app:
+  description: マニュアル登録Bot (Phase 1c). ファイルを整形して GROWI に下書き作成する。
+  icon: 📝
+  icon_background: '#E0F2FE'
+  mode: advanced-chat
+  name: マニュアル登録Bot
+  use_icon_as_answer_icon: false
+kind: app
+version: 0.1.5
+# ============================================================================
+# 注意:
+#  この YAML は参照用スケルトン。Dify のバージョン差でインポートが転びやすい。
+#  確実なのは phase1c-setup.md の手順で UI から組むこと。
+#  各ノードの prompt / code / HTTP body は setup ガイドと同じものを記載している。
+#
+#  インポート後に必ず調整する箇所:
+#   - http_request ノードの URL（docstore-growi の到達 URL）
+#   - llm1 / parameter_extractor ノードのモデル（Anthropic Claude）
+#   - start のファイルアップロード設定（UI 側で ON にする必要あり）
+# ============================================================================
+workflow:
+  conversation_variables: []
+  environment_variables:
+    # docstore-growi の到達 URL（環境ごとに変える）
+    - name: DOCSTORE_URL
+      value: http://host.docker.internal:8001
+      value_type: string
+  features:
+    file_upload:
+      enabled: true
+      allowed_file_types:
+        - document
+      number_limits: 1
+    opening_statement: |
+      整備したいマニュアル（Word/Excel/PDF）を添付し、
+      補足があればメッセージに書いて送ってください。
+      整形して GROWI に下書きを作成します。
+    retriever_resource:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    text_to_speech:
+      enabled: false
+  graph:
+    edges:
+      - {id: e1, source: start, target: doc_extractor, sourceHandle: source, targetHandle: target, type: custom}
+      - {id: e2, source: doc_extractor, target: llm1, sourceHandle: source, targetHandle: target, type: custom}
+      - {id: e3, source: llm1, target: param_extractor, sourceHandle: source, targetHandle: target, type: custom}
+      - {id: e4, source: param_extractor, target: build_body, sourceHandle: source, targetHandle: target, type: custom}
+      - {id: e5, source: build_body, target: http_create, sourceHandle: source, targetHandle: target, type: custom}
+      - {id: e6, source: http_create, target: answer, sourceHandle: source, targetHandle: target, type: custom}
+    nodes:
+      # ── Start（ファイルアップロード）──
+      - id: start
+        type: custom
+        position: {x: 80, y: 282}
+        data:
+          type: start
+          title: 開始
+          variables: []
+
+      # ── Document Extractor ──
+      - id: doc_extractor
+        type: custom
+        position: {x: 360, y: 282}
+        data:
+          type: document-extractor
+          title: ファイル抽出
+          variable_selector: [sys, files]
+          is_array_file: true
+
+      # ── LLM-1: 整形 ──
+      - id: llm1
+        type: custom
+        position: {x: 640, y: 282}
+        data:
+          type: llm
+          title: 整形 (LLM-1)
+          model:
+            provider: anthropic
+            name: claude-sonnet-4-5-20250929   # 利用可能な Claude モデルに
+            mode: chat
+            completion_params:
+              temperature: 0.2
+              max_tokens: 4000
+          prompt_template:
+            - role: system
+              text: |
+                あなたは社内マニュアルを整備する編集者です。
+                アップロードされた素材を、社内標準テンプレートに沿った Markdown に整形してください。
+                ※ 全文は prompts/llm1-format.md を参照。frontmatter に title と path を必ず含めること。
+                出力は整形済み Markdown のみ。
+            - role: user
+              text: |
+                # 元のマニュアル素材
+                {{#doc_extractor.text#}}
+
+                # ユーザーからの補足
+                {{#sys.query#}}
+          context: {enabled: false, variable_selector: []}
+          vision: {enabled: false}
+
+      # ── Parameter Extractor: path/title/type ──
+      - id: param_extractor
+        type: custom
+        position: {x: 920, y: 282}
+        data:
+          type: parameter-extractor
+          title: 項目抽出
+          model:
+            provider: anthropic
+            name: claude-sonnet-4-5-20250929
+            mode: chat
+            completion_params: {temperature: 0}
+          query: [llm1, text]
+          parameters:
+            - {name: path, type: string, required: true, description: frontmatter の path（GROWI 配置パス）}
+            - {name: title, type: string, required: true, description: frontmatter の title}
+            - {name: type, type: string, required: false, description: frontmatter の type}
+          instruction: |
+            与えられた Markdown の frontmatter から path, title, type を抽出してください。
+            値が無い場合は空文字にしてください。
+
+      # ── Code: JSON ボディ組立 ──
+      - id: build_body
+        type: custom
+        position: {x: 1200, y: 282}
+        data:
+          type: code
+          title: ボディ組立
+          code_language: python3
+          variables:
+            - {variable: path, value_selector: [param_extractor, path]}
+            - {variable: title, value_selector: [param_extractor, title]}
+            - {variable: type_, value_selector: [param_extractor, type]}
+            - {variable: content, value_selector: [llm1, text]}
+          code: |
+            import json
+
+            def main(path: str, title: str, type_: str, content: str) -> dict:
+                # content には LLM-1 が作った frontmatter（status: draft 等）が
+                # 既に含まれる。metadata を別送すると frontmatter が二重になるため、
+                # metadata は空にし、content の frontmatter を正とする。
+                # アダプタは読み出し時に frontmatter を metadata に復元する（往復一致）。
+                body = json.dumps(
+                    {
+                        "path": path,
+                        "title": title,
+                        "content": content,
+                        "metadata": {},
+                    },
+                    ensure_ascii=False,
+                )
+                return {"body": body}
+          outputs:
+            - {variable: body, type: string}
+
+      # ── HTTP Request: POST /pages ──
+      - id: http_create
+        type: custom
+        position: {x: 1480, y: 282}
+        data:
+          type: http-request
+          title: GROWI下書き作成
+          method: post
+          url: '{{#env.DOCSTORE_URL#}}/pages'
+          headers: 'Content-Type:application/json'
+          params: ''
+          body:
+            type: raw-text
+            data: '{{#build_body.body#}}'
+          timeout: {max_connect_timeout: 10, max_read_timeout: 60, max_write_timeout: 60}
+
+      # ── Answer ──
+      - id: answer
+        type: custom
+        position: {x: 1760, y: 282}
+        data:
+          type: answer
+          title: 完了通知
+          answer: |
+            GROWI に下書きを作成しました（status: draft）。
+            内容を確認し、問題なければ GROWI で「公開」してください。
+            公開すると次回同期で質問Botに反映されます。
+
+            レスポンス: {{#http_create.body#}}
