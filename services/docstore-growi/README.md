@@ -96,12 +96,29 @@ docker build -t docstore-growi .
 docker run -p 8001:8001 --env-file .env docstore-growi
 ```
 
+## GROWI 7.4.2 で検証済みの API 仕様
+
+ローカルの実 GROWI 7.4.2 に対して全エンドポイントの動作を確認済み
+（health / create / list / get / update / delete + frontmatter 往復 + 表保持）。
+判明したバージョン依存の要点:
+
+| 操作 | エンドポイント / 形式 | 備考 |
+|------|----------------------|------|
+| 作成 | `POST /_api/v3/page`（**単数**） | 複数形 `/pages` は 404 |
+| 取得 | `GET /_api/v3/page?pageId=` | `revision` は dict（`body` あり） |
+| 一覧 | `GET /_api/v3/pages/list?path=` | `revision` は **文字列(ID)**。本文なし → title はパス由来 |
+| 更新 | `PUT /_api/v3/page` {pageId, body, revisionId} | revisionId 不一致で 409 |
+| 削除 | `POST /_api/v3/pages/delete` {pageIdToRevisionIdMap:{id:rev}} | `{pageId,revisionId}` だと 400 |
+| 死活 | `GET /_api/v3/healthcheck` | `{"status":"OK"}` |
+
 ## 注意点・既知の制約
 
-- **GROWI のバージョン差**: `/_api/v3/` のレスポンス形状はバージョンで微妙に異なる。
-  実機接続後、`mappers.py` の取り出しキー（`revision.body` など）を調整する必要があるかもしれない。
+- **削除はソフト削除**: GROWI の delete は既定でゴミ箱（/trash）へ移動する。
+  pageId での GET は引き続き解決するが、`/manuals` 配下の一覧からは消えるため、
+  同期の孤立削除（Dify から除去）は正しく機能する。完全削除が必要なら
+  `isCompletely` オプションの追加を検討。
 - **添付ファイル**: 現状 `attachments` は空配列。Phase 2（画像対応）で実装予定。
-- **変更検知**: 現状は GROWI の recent API を polling する方式。削除イベントは取れない
-  （recent に出ないため）。webhook 方式は Sync Service 側で別途検討。
+- **変更検知**: GROWI の recent API を polling する方式。削除イベントは recent に
+  出ないため取りこぼす → `full` 同期の孤立削除で補修する。
 - **frontmatter**: GROWI 本文の先頭に YAML frontmatter を埋め込む運用前提。
-  GROWI ネイティブのタグ機能とは別管理。
+  GROWI ネイティブのタグ機能とは別管理。読み出し時に frontmatter を metadata に復元する。

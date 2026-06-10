@@ -106,9 +106,12 @@ class GrowiClient:
         path: str,
         body: str,
     ) -> dict[str, Any]:
-        """ページを新規作成する。"""
+        """ページを新規作成する。
+
+        GROWI 7.4.2 では作成は単数形 /_api/v3/page（複数形は 404）。
+        """
         payload = {"path": path, "body": body}
-        return await self._request("POST", "/_api/v3/pages", json=payload)
+        return await self._request("POST", "/_api/v3/page", json=payload)
 
     async def update_page(
         self,
@@ -128,8 +131,12 @@ class GrowiClient:
         return await self._request("PUT", "/_api/v3/page", json=payload)
 
     async def delete_page(self, page_id: str, revision_id: str) -> dict[str, Any]:
-        """ページを削除する。"""
-        payload = {"pageId": page_id, "revisionId": revision_id}
+        """ページを削除する。
+
+        GROWI 7.4.2 は pageId→revisionId のマップ形式を要求する
+        （{pageId, revisionId} 形式だと 400）。
+        """
+        payload = {"pageIdToRevisionIdMap": {page_id: revision_id}}
         return await self._request("POST", "/_api/v3/pages/delete", json=payload)
 
     async def list_recent_changes(

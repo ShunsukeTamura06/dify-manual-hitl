@@ -40,6 +40,8 @@ def client() -> TestClient:
 
 
 def _growi_list_response() -> dict:
+    # 実 GROWI 7.4.2 の /_api/v3/pages/list は revision を「文字列(ID)」で返す
+    # （本文なし）。一覧では title はパス末尾から導出される。
     return {
         "pages": [
             {
@@ -47,19 +49,19 @@ def _growi_list_response() -> dict:
                 "path": "/manuals/経理/経費精算/_howto/国内出張",
                 "createdAt": "2026-01-10T09:00:00.000Z",
                 "updatedAt": "2026-05-29T10:30:00.000Z",
-                "revision": {
-                    "_id": "rev-aaa111",
-                    "body": "---\ntitle: 国内出張の経費精算\ntype: howto\n---\n# 手順\n1. 申請",
-                },
+                "revision": "rev-aaa111",
             },
             {
                 "_id": "65a1b2c3d4e5f60002",
                 "path": "/manuals/人事/勤怠/_howto/勤怠修正",
                 "createdAt": "2026-02-01T09:00:00.000Z",
                 "updatedAt": "2026-05-20T08:00:00.000Z",
-                "revision": {"_id": "rev-bbb222", "body": "# 勤怠の修正"},
+                "revision": "rev-bbb222",
             },
-        ]
+        ],
+        "totalCount": 2,
+        "limit": 100,
+        "offset": 0,
     }
 
 
@@ -102,7 +104,8 @@ def test_list_pages_maps_growi_response(client: TestClient) -> None:
 
     first = body["pages"][0]
     assert first["id"] == "65a1b2c3d4e5f60001"
-    assert first["title"] == "国内出張の経費精算"  # frontmatter 由来
+    # 一覧は本文を持たないため title はパス末尾から導出される
+    assert first["title"] == "国内出張"
     assert first["version"] == "rev-aaa111"
     assert first["viewer_url"] == f"{GROWI_BASE}/manuals/経理/経費精算/_howto/国内出張"
 
@@ -126,7 +129,7 @@ def test_get_page_returns_full_content(client: TestClient) -> None:
 
 @respx.mock
 def test_create_page_sends_frontmatter_body(client: TestClient) -> None:
-    route = respx.post(f"{GROWI_BASE}/_api/v3/pages").mock(
+    route = respx.post(f"{GROWI_BASE}/_api/v3/page").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -164,7 +167,7 @@ def test_create_page_with_frontmatter_content_no_double(client: TestClient) -> N
 
     frontmatter が二重にならず、content がそのまま GROWI に渡ることを保証する。
     """
-    route = respx.post(f"{GROWI_BASE}/_api/v3/pages").mock(
+    route = respx.post(f"{GROWI_BASE}/_api/v3/page").mock(
         return_value=httpx.Response(
             201,
             json={

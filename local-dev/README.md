@@ -21,11 +21,14 @@ Dify + GROWI + 本リポジトリのサービス（docstore-growi / sync）を
 
 ## バージョン方針
 
-**本番の Dify / GROWI と同じバージョンに固定**する。
-- GROWI: `local-dev/docker-compose.growi.yml` の `GROWI_VERSION`
-- Dify: Dify 公式 self-host compose のタグ
+**本番の Dify / GROWI と同じバージョンに固定**する。本番は以下:
+- **Dify: 1.9.2**（公式 self-host compose のタグを 1.9.2 に）
+- **GROWI: 7.4.2**（`docker-compose.growi.yml` で固定済み）
 
 → ローカルで通れば本番でもほぼそのまま通る（API 形状差が消える）。
+
+> 注意: Dify は 1.x で API が 0.x から変わっている。Knowledge API のレスポンス
+> 形状が `dify_client.py` の想定と異なる場合は、ローカル 1.9.2 で実際に叩いて調整する。
 
 ## LLM / 埋め込み
 

@@ -14,14 +14,15 @@ name: manual-local-growi
 
 services:
   growi:
-    image: weseek/growi:${GROWI_VERSION:-7.1.7}   # ← 本番バージョンに合わせる
+    image: weseek/growi:${GROWI_VERSION:-7.4.2}   # 本番に合わせて 7.4.2 で固定
     ports:
-      - "3000:3000"
+      # ホスト 3000 は既存の Dify web が使うため 3001 を割り当てる
+      - "3001:3000"
     depends_on:
       - mongo
     environment:
       - MONGO_URI=mongodb://mongo:27017/growi
-      - APP_SITE_URL=http://localhost:3000
+      - APP_SITE_URL=http://localhost:3001
       - FILE_UPLOAD=local
       # Elasticsearch を無効化（ELASTICSEARCH_URI を設定しない）
       # → 全文検索は無効になるが、本システムは Dify 側で検索するため問題なし
