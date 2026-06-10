@@ -80,6 +80,33 @@ class PageUpdateRequest(BaseModel):
     )
 
 
+class UpsertRequest(BaseModel):
+    """作成 or 更新を 1 エンドポイントで扱う（登録 Bot の単一書込経路用）。
+
+    target_page_id があれば更新、無ければ path に新規作成する。
+    """
+
+    target_page_id: str = Field(default="", description="更新対象のページ ID。空なら新規作成")
+    path: str = Field(description="新規作成時の配置パス")
+    title: str = ""
+    content: str
+    content_format: ContentFormat = ContentFormat.MARKDOWN
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GetContentRequest(BaseModel):
+    """既存ページ本文の取得（マージ用）。page_id 空は許容（新規）。"""
+
+    page_id: str = Field(default="", description="ページ ID。空なら本文も空で返す")
+
+
+class GetContentResponse(BaseModel):
+    exists: bool
+    content: str = ""
+    title: str = ""
+    viewer_url: str = ""
+
+
 class ChangeEventType(StrEnum):
     CREATED = "created"
     UPDATED = "updated"

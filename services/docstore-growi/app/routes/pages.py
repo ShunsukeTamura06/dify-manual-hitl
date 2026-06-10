@@ -13,14 +13,81 @@ from ..mappers import (
     page_to_growi_body,
 )
 from ..models import (
+    GetContentRequest,
+    GetContentResponse,
     Page,
     PageCreateRequest,
     PageList,
     PageUpdateRequest,
+    UpsertRequest,
 )
 from ..settings import get_settings
 
 router = APIRouter(tags=["pages"])
+
+
+@router.post("/pages/get-content", response_model=GetContentResponse)
+async def get_content(
+    req: GetContentRequest,
+    growi: GrowiClient = Depends(get_growi_client),
+) -> GetContentResponse:
+    """既存ページの本文を返す（マージ用）。
+
+    page_id が空、または見つからない場合は exists=False, content="" を返す
+    （登録 Bot の「新規」ケースでもエラーにせず呼べるようにするため）。
+    """
+    if not req.page_id:
+        return GetContentResponse(exists=False)
+    settings = get_settings()
+    try:
+        data = await growi.get_page(req.page_id)
+    except GrowiError:
+        return GetContentResponse(exists=False)
+    page = growi_to_page(data.get("page", data), settings.growi_base_url)
+    return GetContentResponse(
+        exists=True, content=page.content, title=page.title, viewer_url=page.viewer_url
+    )
+
+
+@router.post("/pages/upsert", response_model=Page)
+async def upsert_page(
+    req: UpsertRequest,
+    growi: GrowiClient = Depends(get_growi_client),
+) -> Page:
+    """target_page_id があれば更新、無ければ新規作成する（単一書込経路）。
+
+    登録 Bot のチャットフローに IF/ELSE を持たせず一直線にするためのエンドポイント。
+    """
+    settings = get_settings()
+    body = page_to_growi_body(req.content, req.metadata)
+
+    if req.target_page_id:
+        # 更新: 現在リビジョンを取得して PUT
+        try:
+            current = await growi.get_page(req.target_page_id)
+        except GrowiError as exc:
+            if exc.status_code == 404:
+                raise HTTPException(status_code=404, detail="更新対象が見つかりません") from exc
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        cur_page = current.get("page", current)
+        rev = cur_page.get("revision")
+        cur_rev = str(rev.get("_id", "")) if isinstance(rev, dict) else str(rev or "")
+        try:
+            data = await growi.update_page(
+                page_id=req.target_page_id, body=body, revision_id=cur_rev
+            )
+        except GrowiError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    else:
+        # 新規作成
+        try:
+            data = await growi.create_page(path=req.path, body=body)
+        except GrowiError as exc:
+            if exc.status_code == 409:
+                raise HTTPException(status_code=409, detail="パスが重複しています") from exc
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return growi_to_page(data.get("page", data), settings.growi_base_url)
 
 
 @router.get("/pages", response_model=PageList)

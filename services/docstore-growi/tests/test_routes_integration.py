@@ -206,6 +206,61 @@ def test_create_page_with_frontmatter_content_no_double(client: TestClient) -> N
     assert "status: draft" in sent_body
 
 
+def test_get_content_empty_id_returns_empty(client: TestClient) -> None:
+    """page_id 空（新規ケース）はエラーにせず exists=False を返す。"""
+    resp = client.post("/pages/get-content", json={"page_id": ""})
+    assert resp.status_code == 200
+    assert resp.json() == {"exists": False, "content": "", "title": "", "viewer_url": ""}
+
+
+@respx.mock
+def test_get_content_returns_existing(client: TestClient) -> None:
+    respx.get(f"{GROWI_BASE}/_api/v3/page").mock(
+        return_value=httpx.Response(200, json=_growi_single_page_response())
+    )
+    resp = client.post("/pages/get-content", json={"page_id": "65a1b2c3d4e5f60001"})
+    body = resp.json()
+    assert body["exists"] is True
+    assert "# 手順" in body["content"]
+    assert body["title"] == "国内出張の経費精算"
+
+
+@respx.mock
+def test_upsert_creates_when_no_target(client: TestClient) -> None:
+    route = respx.post(f"{GROWI_BASE}/_api/v3/page").mock(
+        return_value=httpx.Response(201, json={
+            "page": {"_id": "new1", "path": "/manuals/新規",
+                     "updatedAt": "2026-06-10T00:00:00.000Z",
+                     "revision": {"_id": "r1", "body": "x"}}})
+    )
+    resp = client.post("/pages/upsert", json={
+        "target_page_id": "", "path": "/manuals/新規", "title": "新規",
+        "content": "# 本文", "metadata": {}})
+    assert resp.status_code == 200
+    assert route.called  # 新規は POST /_api/v3/page
+
+
+@respx.mock
+def test_upsert_updates_when_target(client: TestClient) -> None:
+    # 既存取得（リビジョン解決）→ PUT
+    respx.get(f"{GROWI_BASE}/_api/v3/page").mock(
+        return_value=httpx.Response(200, json=_growi_single_page_response())
+    )
+    put_route = respx.put(f"{GROWI_BASE}/_api/v3/page").mock(
+        return_value=httpx.Response(201, json={
+            "page": {"_id": "65a1b2c3d4e5f60001", "path": "/manuals/x",
+                     "updatedAt": "2026-06-10T00:00:00.000Z",
+                     "revision": {"_id": "r2", "body": "merged"}}})
+    )
+    resp = client.post("/pages/upsert", json={
+        "target_page_id": "65a1b2c3d4e5f60001", "path": "", "title": "更新",
+        "content": "# マージ後", "metadata": {}})
+    assert resp.status_code == 200
+    assert put_route.called  # 更新は PUT
+    sent = put_route.calls[0].request.content.decode()
+    assert "マージ後" in sent
+
+
 @respx.mock
 def test_health_reports_growi_reachable(client: TestClient) -> None:
     respx.get(f"{GROWI_BASE}/_api/v3/healthcheck").mock(
