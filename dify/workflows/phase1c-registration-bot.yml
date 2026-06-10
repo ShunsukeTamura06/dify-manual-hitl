@@ -9,21 +9,27 @@ kind: app
 version: 0.1.5
 # ============================================================================
 # 注意:
-#  この YAML は参照用スケルトン。Dify のバージョン差でインポートが転びやすい。
-#  確実なのは phase1c-setup.md の手順で UI から組むこと。
-#  各ノードの prompt / code / HTTP body は setup ガイドと同じものを記載している。
+#  Dify 1.9.2 で DSL インポート → 起動まで実機検証済み（completed-with-warnings で
+#  インポートでき、本ファイルの反映済み修正で正常動作する）。
+#  検証時に判明した 1.9.2 必須フィールドは本ファイルに反映済み:
+#   - parameter-extractor: reasoning_mode
+#   - code: outputs は辞書形式
+#   - http-request: authorization
 #
-#  インポート後に必ず調整する箇所:
-#   - http_request ノードの URL（docstore-growi の到達 URL）
-#   - llm1 / parameter_extractor ノードのモデル（Anthropic Claude）
-#   - start のファイルアップロード設定（UI 側で ON にする必要あり）
+#  インポート後に環境に合わせて調整する箇所:
+#   - llm1 / parameter_extractor ノードのモデル（既定は Anthropic Claude。
+#     OpenAI を使うなら provider=langgenius/openai/openai, name=gpt-4o-mini 等）
+#   - environment_variables の DOCSTORE_URL（下記）
 # ============================================================================
 workflow:
   conversation_variables: []
   environment_variables:
-    # docstore-growi の到達 URL（環境ごとに変える）
+    # docstore-growi の到達 URL。
+    # Dify と同じ docker ネットワークにコンテナ配置するなら http://docstore-growi:8001
+    # （Dify の HTTP ノードは ssrf_proxy 経由。コンテナ名で到達でき検証済み）。
+    # ホストで uvicorn 起動なら http://host.docker.internal:8001
     - name: DOCSTORE_URL
-      value: http://host.docker.internal:8001
+      value: http://docstore-growi:8001
       value_type: string
   features:
     file_upload:
@@ -110,6 +116,7 @@ workflow:
         data:
           type: parameter-extractor
           title: 項目抽出
+          reasoning_mode: prompt   # Dify 1.9.2 で必須
           model:
             provider: anthropic
             name: claude-sonnet-4-5-20250929
@@ -155,8 +162,9 @@ workflow:
                     ensure_ascii=False,
                 )
                 return {"body": body}
+          # Dify 1.9.2 では outputs は辞書形式
           outputs:
-            - {variable: body, type: string}
+            body: {type: string}
 
       # ── HTTP Request: POST /pages ──
       - id: http_create
@@ -167,6 +175,7 @@ workflow:
           title: GROWI下書き作成
           method: post
           url: '{{#env.DOCSTORE_URL#}}/pages'
+          authorization: {type: no-auth, config: null}   # Dify 1.9.2 で必須
           headers: 'Content-Type:application/json'
           params: ''
           body:

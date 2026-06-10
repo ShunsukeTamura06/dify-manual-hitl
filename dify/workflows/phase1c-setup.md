@@ -4,9 +4,12 @@
 LLM は Dify 経由（プロキシ制約のため Claude 直叩きはしない）。
 GROWI 書き込みは docstore-growi アダプタの `POST /pages` を HTTP Request ノードで叩く。
 
-> YAML インポート（[phase1c-registration-bot.yml](phase1c-registration-bot.yml)）でも作れるが、
-> Dify のバージョン差で転びやすい。**この手順で UI から組むのが確実**。
-> 各ノードの設定値・スクリプトはこの文書からコピーできる。
+> **推奨は YAML インポート**（[phase1c-registration-bot.yml](phase1c-registration-bot.yml)）。
+> Dify 1.9.2 で「スタジオ → アプリ作成 → DSL からインポート」→ 起動まで実機検証済み
+> （1.9.2 必須フィールドは YAML に反映済み）。インポート後に LLM のモデルを環境に合わせて
+> 選び直し（OpenAI なら gpt-4o-mini 等）、environment_variables の DOCSTORE_URL を確認すればよい。
+>
+> 以下は UI から手組みする場合の手順（各ノードの設定値・スクリプトのリファレンスも兼ねる）。
 
 ---
 
