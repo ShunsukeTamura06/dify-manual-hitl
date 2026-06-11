@@ -89,3 +89,13 @@ def test_main_wrapper_shape() -> None:
     assert set(out) == {"windows"}
     assert isinstance(out["windows"], list)
     assert all(isinstance(w, str) for w in out["windows"])
+
+
+def test_main_accepts_array_file_input() -> None:
+    """is_array_file の Document Extractor は text を array[string] で返す。"""
+    out = main(["ファイル1の本文。", "ファイル2の本文。"])
+    assert out["windows"] == ["ファイル1の本文。\n\nファイル2の本文。"]
+
+
+def test_main_handles_none() -> None:
+    assert main(None) == {"windows": []}

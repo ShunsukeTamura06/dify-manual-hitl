@@ -69,6 +69,40 @@ def test_dangling_incomplete_merges_even_if_next_flag_missing() -> None:
     assert "前半。" in pages[0]["content"] and "後半。" in pages[0]["content"]
 
 
+def test_boundary_same_title_merges_without_flags() -> None:
+    """実機 gpt-4o-mini 再現: フラグ未設定でも、境界で同名なら結合する。
+
+    見出しのみの stub（ウィンドウ末尾）と本体（次ウィンドウ先頭）が同名で割れても、
+    1ページに結合し内容を落とさない（同一パス衝突も防ぐ）。
+    """
+    results = [
+        _win(
+            _page("立替金を精算する", "立替金の本文。"),
+            _page("定期券を申請する", "定期券を申請する手順を説明します。"),  # stub（見出しのみ）
+        ),
+        _win(
+            _page("定期券を申請する", "1. 区間を選ぶ\n2. 期間を選ぶ\n3. 申請する"),  # 本体
+            _page("精算の差戻しに対応する", "差戻しの本文。"),
+        ),
+    ]
+    pages = merge_window_pages(results)
+    assert [p["title"] for p in pages] == [
+        "立替金を精算する",
+        "定期券を申請する",
+        "精算の差戻しに対応する",
+    ]
+    teiki = pages[1]["content"]
+    assert "手順を説明します" in teiki
+    assert "区間を選ぶ" in teiki and "申請する" in teiki
+
+
+def test_same_title_not_at_boundary_stays_separate() -> None:
+    """同一ウィンドウ内の同名トピックは（境界でないので）結合しない。"""
+    results = [_win(_page("注意事項", "A。"), _page("注意事項", "B。"))]
+    pages = merge_window_pages(results)
+    assert len(pages) == 2
+
+
 def test_continues_previous_with_no_prior_page_becomes_new() -> None:
     """先頭ウィンドウで continues_previous が立っていても落とさず新規ページにする。"""
     results = [_win(_page("孤児", "中身。", cont=True))]

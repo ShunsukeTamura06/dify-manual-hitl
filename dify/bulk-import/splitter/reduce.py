@@ -68,13 +68,23 @@ def _coerce_pages(window_result: Any) -> list[dict[str, Any]]:
     return pages
 
 
+def _normalize_title(title: str) -> str:
+    """タイトル比較用の正規化（前後空白除去・内部空白圧縮）。"""
+    return " ".join(title.split())
+
+
 def merge_window_pages(window_results: list[Any]) -> list[dict[str, str]]:
     """ウィンドウ群の LLM 出力を継ぎ合わせ、最終ページ一覧を返す。
 
     継ぎ合わせ条件（いずれかで前ページに連結）:
     - そのページの continues_previous が真。
     - ウィンドウ先頭のページで、直前ウィンドウ末尾が incomplete だった。
-      （フラグ片方欠けでも内容を落とさないための保険）
+    - ウィンドウ先頭のページのタイトルが、直前ウィンドウ末尾ページのタイトルと一致する。
+      （実機の gpt-4o-mini はフラグを立てないことがあるため、境界でのタイトル一致を
+      フォールバックにする。同名トピックが見出しのみ＋本体に割れて別ページ化＆パス衝突する
+      事故を防ぐ。文書非依存＝特定マーカーに依存しない。）
+
+    いずれもフラグ／タイトルの不整合でも内容を落とさない方向に倒す。
 
     Args:
         window_results: 各ウィンドウの LLM 出力（JSON 文字列 or パース済み）のリスト。
@@ -87,7 +97,16 @@ def merge_window_pages(window_results: list[Any]) -> list[dict[str, str]]:
     for result in window_results:
         pages = _coerce_pages(result)
         for i, page in enumerate(pages):
-            join = bool(merged) and (page["continues_previous"] or (i == 0 and prev_dangling))
+            at_boundary = i == 0  # ウィンドウ先頭＝境界候補
+            same_title = (
+                at_boundary
+                and bool(merged)
+                and bool(page["title"])
+                and _normalize_title(merged[-1]["title"]) == _normalize_title(page["title"])
+            )
+            join = bool(merged) and (
+                page["continues_previous"] or (at_boundary and prev_dangling) or same_title
+            )
             if join:
                 tail = merged[-1]
                 tail["content"] = f'{tail["content"].rstrip()}\n\n{page["content"].lstrip()}'

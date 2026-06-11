@@ -95,13 +95,27 @@ def split_into_windows(text: str, max_chars: int = DEFAULT_MAX_CHARS) -> list[st
     return windows
 
 
-def main(text: str) -> dict[str, list[str]]:
+def _coerce_text(text: object) -> str:
+    """Document Extractor の出力を文字列に正規化する。
+
+    複数ファイル対応（is_array_file）の抽出ノードは text を array[string] で返すため、
+    リストで来たら段落区切りで連結する。None は空文字にする。
+    """
+    if isinstance(text, list):
+        return "\n\n".join(str(t) for t in text if t)
+    if text is None:
+        return ""
+    return str(text)
+
+
+def main(text: object) -> dict[str, list[str]]:
     """Dify Code ノード用エントリ。
 
     Args:
         text: 前段（Document Extractor / 前処理）から渡る抽出テキスト。
+            単一文字列でも array[string]（複数ファイル）でも受け付ける。
 
     Returns:
         {"windows": [ウィンドウ文字列, ...]}。後続の Iteration ノードで反復する。
     """
-    return {"windows": split_into_windows(text, DEFAULT_MAX_CHARS)}
+    return {"windows": split_into_windows(_coerce_text(text), DEFAULT_MAX_CHARS)}

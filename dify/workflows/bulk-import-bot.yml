@@ -1,0 +1,927 @@
+# 一括取り込みBot — 大規模文書を分割して複数ページに取り込む (案A Map-Reduce)
+# 既存の登録Bot(1ファイル=1ページ)とは別アプリ。巨大文書が1ページに圧縮される問題の解決。
+#
+# フロー:
+#   Start(file) → 抽出 → ウィンドウ分割(Code)
+#     → Iteration(各ウィンドウ): LLMで完結トピックをJSON配列抽出
+#     → 継ぎ合わせ(Code: 境界セクション結合)
+#     → Iteration(各ページ): 整形LLM → frontmatter解析+body組立(Code) → GROWI upsert(HTTP)
+#     → 集計(Code) → 回答
+#
+# Code ノードのロジックは dify/bulk-import/splitter/ と同一(ローカル単体テスト済み)。
+# インポート後の環境合わせ: LLMモデル / environment_variables.DOCSTORE_URL。
+app:
+  description: 一括取り込みBot. 大規模マニュアルを分割し複数の下書きページを GROWI に作成する。
+  icon: 📚
+  icon_background: '#FEF3C7'
+  mode: advanced-chat
+  name: 一括取り込みBot
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/openai:0.4.2@21195ee1321849e0a7d4b3f6b2fd8c2be23ea6c7182e1b444ecc4c1711b52468
+    version: null
+kind: app
+version: 0.4.0
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - description: ''
+    id: 1174e719-482b-4749-aead-1056eb332db0
+    name: DOCSTORE_URL
+    selector:
+    - env
+    - DOCSTORE_URL
+    value: http://docstore-growi:8001
+    value_type: string
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - document
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: true
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 1
+    opening_statement: '大規模なマニュアル（Word/Excel/PDF）を添付してください。
+
+      部署や業務カテゴリの補足があればメッセージに書いてください。
+
+      内容を落とさずに複数ページへ分割し、GROWI に下書きを作成します。
+
+      '
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: document-extractor
+      id: e_start_doc
+      source: start
+      sourceHandle: source
+      target: doc_extractor
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: document-extractor
+        targetType: code
+      id: e_doc_split
+      source: doc_extractor
+      sourceHandle: source
+      target: split_windows
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: iteration
+      id: e_split_itermap
+      source: split_windows
+      sourceHandle: source
+      target: iter_map
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_map
+        sourceType: iteration-start
+        targetType: llm
+      id: e_itermapstart_windowllm
+      source: iter_mapstart
+      sourceHandle: source
+      target: window_llm
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: iteration
+        targetType: code
+      id: e_itermap_merge
+      source: iter_map
+      sourceHandle: source
+      target: merge_pages
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: iteration
+      id: e_merge_iterreduce
+      source: merge_pages
+      sourceHandle: source
+      target: iter_reduce
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_reduce
+        sourceType: iteration-start
+        targetType: code
+      id: e_iterreducestart_unpack
+      source: iter_reducestart
+      sourceHandle: source
+      target: unpack
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_reduce
+        sourceType: code
+        targetType: llm
+      id: e_unpack_fmtllm
+      source: unpack
+      sourceHandle: source
+      target: fmt_llm
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_reduce
+        sourceType: llm
+        targetType: code
+      id: e_fmtllm_fmtbuild
+      source: fmt_llm
+      sourceHandle: source
+      target: fmt_build
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_reduce
+        sourceType: code
+        targetType: http-request
+      id: e_fmtbuild_httpupsert
+      source: fmt_build
+      sourceHandle: source
+      target: http_upsert
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: iteration
+        targetType: code
+      id: e_iterreduce_summarize
+      source: iter_reduce
+      sourceHandle: source
+      target: summarize
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: e_summarize_answer
+      source: summarize
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: 開始
+        type: start
+        variables: []
+      height: 54
+      id: start
+      position:
+        x: 80
+        y: 282
+      positionAbsolute:
+        x: 80
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        is_array_file: true
+        selected: false
+        title: ファイル抽出
+        type: document-extractor
+        variable_selector:
+        - sys
+        - files
+      height: 92
+      id: doc_extractor
+      position:
+        x: 360
+        y: 282
+      positionAbsolute:
+        x: 360
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "\nimport re\n\nDEFAULT_MAX_CHARS = 7000\n_PARAGRAPH_SEP = re.compile(r\"\\n[ \\t]*\\n\")\n\
+        \n\ndef _split_paragraphs(text):\n    return [p for p in _PARAGRAPH_SEP.split(text) if p.strip()]\n\
+        \n\ndef _hard_split(chunk, max_chars):\n    if len(chunk) <= max_chars:\n        return [chunk]\n\
+        \    pieces = []\n    buf = \"\"\n    for line in chunk.splitlines(keepends=True):\n\
+        \        while len(line) > max_chars:\n            if buf:\n                pieces.append(buf)\n\
+        \                buf = \"\"\n            pieces.append(line[:max_chars])\n            line = line[max_chars:]\n\
+        \        if buf and len(buf) + len(line) > max_chars:\n            pieces.append(buf)\n\
+        \            buf = \"\"\n        buf += line\n    if buf:\n        pieces.append(buf)\n    return pieces\n\
+        \n\ndef split_into_windows(text, max_chars=DEFAULT_MAX_CHARS):\n    windows = []\n    buf = \"\"\n\
+        \    for para in _split_paragraphs(text):\n        if len(para) > max_chars:\n            if buf:\n\
+        \                windows.append(buf)\n                buf = \"\"\n            windows.extend(_hard_split(para, max_chars))\n\
+        \            continue\n        candidate = para if not buf else buf + \"\\n\\n\" + para\n\
+        \        if len(candidate) > max_chars:\n            windows.append(buf)\n            buf = para\n\
+        \        else:\n            buf = candidate\n    if buf:\n        windows.append(buf)\n    return windows\n\
+        \n\ndef _coerce_text(text):\n    if isinstance(text, list):\n        return \"\\n\\n\".join(str(t) for t in text if t)\n\
+        \    if text is None:\n        return \"\"\n    return str(text)\n\
+        \n\ndef main(text) -> dict:\n    return {\"windows\": split_into_windows(_coerce_text(text))}\n"
+        code_language: python3
+        desc: 段落境界で ~7000 字のウィンドウに機械分割（文書非依存）
+        outputs:
+          windows:
+            children: null
+            type: array[string]
+        selected: false
+        title: ウィンドウ分割
+        type: code
+        variables:
+        - value_selector:
+          - doc_extractor
+          - text
+          variable: text
+      height: 54
+      id: split_windows
+      position:
+        x: 640
+        y: 282
+      positionAbsolute:
+        x: 640
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        error_handle_mode: terminated
+        height: 250
+        is_parallel: false
+        iterator_input_type: array[string]
+        iterator_selector:
+        - split_windows
+        - windows
+        output_selector:
+        - window_llm
+        - text
+        output_type: array[string]
+        parallel_nums: 5
+        selected: false
+        start_node_id: iter_mapstart
+        title: 各ウィンドウを処理
+        type: iteration
+        width: 460
+      height: 250
+      id: iter_map
+      position:
+        x: 920
+        y: 282
+      positionAbsolute:
+        x: 920
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 460
+      zIndex: 1
+    - data:
+        desc: ''
+        isInIteration: true
+        selected: false
+        title: ''
+        type: iteration-start
+      draggable: false
+      height: 48
+      id: iter_mapstart
+      parentId: iter_map
+      position:
+        x: 24
+        y: 100
+      positionAbsolute:
+        x: 944
+        y: 382
+      selectable: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-iteration-start
+      width: 44
+      zIndex: 1002
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_map
+        model:
+          completion_params:
+            max_tokens: 8000
+            temperature: 0.2
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: 'あなたは長い文書を整理する編集者です。与えられるのは、ある文書を機械的に区切った「一部分（ウィンドウ）」です。
+            このウィンドウを、章・節レベルの大きなまとまり（=ページ候補）に分け、JSON 配列で出力してください。
+
+
+            # 分割の単位（最重要・厳守）
+
+            - 1つのトピック = 1つの見出しとその配下の本文「すべて」。手順なら番号付きステップ全体を1つに含める。
+
+            - 番号付きの手順・ステップ・箇条書きの項目を、それぞれ別トピックに分割してはいけない（致命的な誤り）。
+
+            - 「ステップ1」「手順2」「(1)」などの小項目は決して独立したトピックにしない。親の見出しに含める。
+
+            - 見出しに付随する「注意事項」「補足」「例」等の小節は、原則その見出しのトピックに含める（独立させない）。
+
+            - 目安: 1ウィンドウあたり 1〜6 トピック程度。数十に分割するのは過剰分割であり誤り。
+
+            - 文書の種類や見出し書式に依存しない。特定の番号付け（「第N条」「事例N」等）を前提にしない。
+
+
+            # 良い例 / 悪い例
+
+            入力例: 「## 定期券を申請する\n手順を説明します。\n1. 区間を選ぶ\n2. 期間を選ぶ\n3. 申請する\n注意:
+            半年定期が原則。」
+
+            良い出力（1トピック）: [{"title":"定期券を申請する","content":"...手順とステップ1-3と注意をすべて含む...","continues_previous":false,"incomplete":false}]
+
+            悪い出力（過剰分割・禁止）: ステップ1, ステップ2, ステップ3, 注意 をそれぞれ別トピックにする。
+
+
+            # ウィンドウ境界の扱い（重要）
+
+            このウィンドウは文書の途中を切り出したものなので、トピックが境界をまたぐことがある。
+
+            - 冒頭が前のウィンドウから続く内容（見出しが前ウィンドウ末尾にあった等）なら、最初のトピックに "continues_previous":
+            true を付ける。
+
+            - 末尾のトピックがまだ続いて途中で切れているなら、そのトピックに "incomplete": true を付ける。
+
+            - 当てはまらないトピックは両フラグとも false。
+
+
+            # 内容の扱い
+
+            - 元の事実・数値・固有名詞・表の中身を改変・要約・省略しない。このウィンドウの内容はすべてどれかのトピックの
+            content に入れる（取りこぼさない）。
+
+            - 表（Markdown テーブル）は崩さずそのまま content に含める。
+
+            - content は読みやすい Markdown に整える（情報の追加・創作はしない）。
+
+
+            # 出力形式（厳守）
+
+            - JSON 配列「のみ」を出力する。前置き・後書き・コードフェンスを付けない。
+
+            - 各要素: {"title": "見出し", "content": "本文(Markdown)", "continues_previous": false, "incomplete":
+            false}
+
+            - トピックが無い（空白等）場合は空配列 [] を出力する。'
+        - role: user
+          text: '# ウィンドウ本文
+
+            {{#iter_map.item#}}'
+        selected: false
+        title: トピック抽出
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: window_llm
+      parentId: iter_map
+      position:
+        x: 128
+        y: 100
+      positionAbsolute:
+        x: 1048
+        y: 382
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+      zIndex: 1002
+    - data:
+        code: |
+
+          import json
+
+
+          def _coerce_pages(window_result):
+              data = window_result
+              if isinstance(window_result, str):
+                  text = window_result.strip()
+                  if not text:
+                      return []
+                  try:
+                      data = json.loads(text)
+                  except Exception:
+                      start = text.find("[")
+                      end = text.rfind("]")
+                      if start == -1 or end <= start:
+                          return []
+                      try:
+                          data = json.loads(text[start:end + 1])
+                      except Exception:
+                          return []
+              if isinstance(data, dict):
+                  data = [data]
+              if not isinstance(data, list):
+                  return []
+              pages = []
+              for item in data:
+                  if not isinstance(item, dict):
+                      continue
+                  pages.append({
+                      "title": str(item.get("title", "")).strip(),
+                      "content": str(item.get("content", "")),
+                      "continues_previous": bool(item.get("continues_previous", False)),
+                      "incomplete": bool(item.get("incomplete", False)),
+                  })
+              return pages
+
+
+          def _normalize_title(t):
+              return " ".join(t.split())
+
+
+          def main(window_results: list) -> dict:
+              merged = []
+              prev_dangling = False
+              for result in (window_results or []):
+                  pages = _coerce_pages(result)
+                  for i, page in enumerate(pages):
+                      at_boundary = i == 0
+                      same_title = (at_boundary and bool(merged) and bool(page["title"])
+                                    and _normalize_title(merged[-1]["title"]) == _normalize_title(page["title"]))
+                      join = bool(merged) and (page["continues_previous"]
+                                               or (at_boundary and prev_dangling) or same_title)
+                      if join:
+                          tail = merged[-1]
+                          tail["content"] = tail["content"].rstrip() + "\n\n" + page["content"].lstrip()
+                          if not tail["title"] and page["title"]:
+                              tail["title"] = page["title"]
+                      else:
+                          merged.append({"title": page["title"], "content": page["content"]})
+                  prev_dangling = bool(pages) and pages[-1]["incomplete"]
+              return {"pages": merged}
+
+        code_language: python3
+        desc: ウィンドウ境界で分断されたセクションを継ぎ合わせる
+        outputs:
+          pages:
+            children: null
+            type: array[object]
+        selected: false
+        title: 継ぎ合わせ
+        type: code
+        variables:
+        - value_selector:
+          - iter_map
+          - output
+          variable: window_results
+      height: 54
+      id: merge_pages
+      position:
+        x: 1440
+        y: 282
+      positionAbsolute:
+        x: 1440
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        error_handle_mode: continue-on-error
+        height: 300
+        is_parallel: false
+        iterator_input_type: array[object]
+        iterator_selector:
+        - merge_pages
+        - pages
+        output_selector:
+        - http_upsert
+        - body
+        output_type: array[string]
+        parallel_nums: 3
+        selected: false
+        start_node_id: iter_reducestart
+        title: 各ページを作成
+        type: iteration
+        width: 1140
+      height: 300
+      id: iter_reduce
+      position:
+        x: 1760
+        y: 282
+      positionAbsolute:
+        x: 1760
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 1140
+      zIndex: 1
+    - data:
+        desc: ''
+        isInIteration: true
+        selected: false
+        title: ''
+        type: iteration-start
+      draggable: false
+      height: 48
+      id: iter_reducestart
+      parentId: iter_reduce
+      position:
+        x: 24
+        y: 120
+      positionAbsolute:
+        x: 1784
+        y: 402
+      selectable: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-iteration-start
+      width: 44
+      zIndex: 1002
+    - data:
+        code: "\ndef main(item: dict) -> dict:\n    item = item or {}\n    return {\n\
+        \        \"title\": str(item.get(\"title\", \"\")),\n        \"content\": str(item.get(\"content\", \"\")),\n    }\n"
+        code_language: python3
+        desc: ページオブジェクトを title/content に展開
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_reduce
+        outputs:
+          content:
+            children: null
+            type: string
+          title:
+            children: null
+            type: string
+        selected: false
+        title: 展開
+        type: code
+        variables:
+        - value_selector:
+          - iter_reduce
+          - item
+          variable: item
+      height: 54
+      id: unpack
+      parentId: iter_reduce
+      position:
+        x: 120
+        y: 120
+      positionAbsolute:
+        x: 1880
+        y: 402
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 200
+      zIndex: 1002
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_reduce
+        model:
+          completion_params:
+            max_tokens: 8000
+            temperature: 0.2
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: 'あなたは社内マニュアルを整備する編集者です。1つのトピックの素材を、社内標準テンプレートに沿った Markdown
+            に整形してください。
+
+
+            # 出力は必ず frontmatter + 本文。frontmatter:
+
+            ---
+
+            title: 動詞+目的語のタイトル（reference/explanation は名詞可）
+
+            path: 下の「path の決め方」に従う
+
+            type: tutorial | howto | reference | explanation
+
+            audience: 対象者（不明なら 全社）
+
+            status: draft
+
+            canonical: false
+
+            ---
+
+
+            # path の決め方（重要・厳守）
+
+            - 形式: /manuals/<部署>/<業務カテゴリ>/_<type>/<タスク名>
+
+            - 各セグメントは日本語のまま書く（英語・ローマ字・slug に変換しない）。スペースは入れない。
+
+            - 部署・カテゴリはユーザー補足から判断し、不明なら「未分類」を使う。
+
+            - 例: /manuals/総務/出張/_howto/出張を申請する
+
+
+            # 本文
+
+            - 見出し直下に1-2文の要約。表は残し直前に要約平文を付ける。連番厳守。略語は定義。
+
+            - 素材に無い情報は創作しない。元の事実・数値・固有名詞・表の中身を改変しない。
+
+
+            # 出力形式（厳守）
+
+            - frontmatter を含む Markdown 本文そのものだけを出力する。``` で囲まない。前置き・説明文を付けない。'
+        - role: user
+          text: '# トピックの仮タイトル
+
+            {{#unpack.title#}}
+
+
+            # トピックの素材
+
+            {{#unpack.content#}}
+
+
+            # ユーザーからの補足（部署・カテゴリ等）
+
+            {{#sys.query#}}'
+        selected: false
+        title: ページ整形
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: fmt_llm
+      parentId: iter_reduce
+      position:
+        x: 360
+        y: 120
+      positionAbsolute:
+        x: 2120
+        y: 402
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+      zIndex: 1002
+    - data:
+        code: "\nimport json\nimport re\n\n\ndef main(md: str, fallback_title: str) -> dict:\n\
+        \    md = md or \"\"\n    path = \"\"\n    title = \"\"\n    m = re.search(r\"^path:\\s*(.+)$\", md, re.MULTILINE)\n\
+        \    if m:\n        path = m.group(1).strip()\n    m = re.search(r\"^title:\\s*(.+)$\", md, re.MULTILINE)\n\
+        \    if m:\n        title = m.group(1).strip()\n    if not title:\n        title = (fallback_title or \"\").strip() or \"無題ページ\"\n\
+        \    if not path:\n        path = \"/manuals/未分類/_reference/\" + title\n    body = json.dumps({\n\
+        \        \"target_page_id\": \"\",\n        \"path\": path,\n        \"title\": title,\n\
+        \        \"content\": md,\n        \"metadata\": {},\n    }, ensure_ascii=False)\n    return {\"body\": body, \"path\": path, \"title\": title}\n"
+        code_language: python3
+        desc: frontmatter から path/title を取り出し upsert ボディを組む
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_reduce
+        outputs:
+          body:
+            children: null
+            type: string
+          path:
+            children: null
+            type: string
+          title:
+            children: null
+            type: string
+        selected: false
+        title: ボディ組立
+        type: code
+        variables:
+        - value_selector:
+          - fmt_llm
+          - text
+          variable: md
+        - value_selector:
+          - unpack
+          - title
+          variable: fallback_title
+      height: 54
+      id: fmt_build
+      parentId: iter_reduce
+      position:
+        x: 640
+        y: 120
+      positionAbsolute:
+        x: 2400
+        y: 402
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 200
+      zIndex: 1002
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{{#fmt_build.body#}}'
+          type: raw-text
+        desc: ''
+        headers: Content-Type:application/json
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_reduce
+        method: post
+        params: ''
+        selected: false
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        title: GROWI作成
+        type: http-request
+        url: '{{#env.DOCSTORE_URL#}}/pages/upsert'
+        variables: []
+      height: 120
+      id: http_upsert
+      parentId: iter_reduce
+      position:
+        x: 880
+        y: 120
+      positionAbsolute:
+        x: 2640
+        y: 402
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 200
+      zIndex: 1002
+    - data:
+        code: |
+
+          import json
+
+
+          def main(results: list, expected: list) -> dict:
+              results = results or []
+              expected = expected or []
+              lines = []
+              ok = 0
+              for r in results:
+                  title = ""
+                  try:
+                      d = json.loads(r) if isinstance(r, str) else r
+                      if isinstance(d, dict):
+                          title = d.get("title") or d.get("path") or ""
+                          if d.get("viewer_url") or d.get("id"):
+                              ok += 1
+                  except Exception:
+                      pass
+                  if title:
+                      lines.append("- " + str(title))
+              total = len(expected)
+              head = str(ok) + " / " + str(total) + " ページを作成しました。"
+              if ok < total:
+                  head += "（" + str(total - ok) + " 件は作成に失敗しました。再実行で未作成分を補完できます）"
+              text = head + "\n" + "\n".join(lines)
+              return {"text": text}
+
+        code_language: python3
+        desc: 作成結果を集計
+        outputs:
+          text:
+            children: null
+            type: string
+        selected: false
+        title: 集計
+        type: code
+        variables:
+        - value_selector:
+          - iter_reduce
+          - output
+          variable: results
+        - value_selector:
+          - merge_pages
+          - pages
+          variable: expected
+      height: 54
+      id: summarize
+      position:
+        x: 2960
+        y: 282
+      positionAbsolute:
+        x: 2960
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '一括取り込みが完了しました（status: draft）。GROWI で内容を確認し、問題なければ公開してください。
+
+
+          {{#summarize.text#}}'
+        desc: ''
+        selected: false
+        title: 完了通知
+        type: answer
+        variables: []
+      height: 150
+      id: answer
+      position:
+        x: 3240
+        y: 282
+      positionAbsolute:
+        x: 3240
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7
+  rag_pipeline_variables: []
