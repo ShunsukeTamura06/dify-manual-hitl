@@ -20,6 +20,10 @@ from typing import Any
 # クラスタを「高確信（一括承認）」と見なす最小の重なり率（最悪ペアで判定）。
 HIGH_OVERLAP = 0.8
 
+# 重複候補として拾う最小の重なり率。これ未満は無関係とみなしクラスタ化しない。
+# HIGH_OVERLAP より低くし、0.5〜0.8 の「似ているが要確認」も候補に含める。
+CANDIDATE_OVERLAP = 0.5
+
 
 def _norm(text: str) -> str:
     """重なり比較用の正規化（前後空白除去・内部空白圧縮）。"""
@@ -162,14 +166,55 @@ def build_proposals(
     return proposals
 
 
-def main(pages: list[dict[str, Any]], pairs: Any) -> dict[str, list[dict[str, Any]]]:
+def candidate_pairs_from_content(
+    pages: list[dict[str, Any]], threshold: float = CANDIDATE_OVERLAP
+) -> list[tuple[str, str, float]]:
+    """全ページの本文を総当たりで比較し、重なりが閾値以上のペアを候補にする。
+
+    意味検索（Dify Knowledge Retrieval）を使わずに、difflib だけで候補ペアを作る経路。
+    決定的で文書非依存・stdlib のみ。O(n^2) なので中規模コーパス向け（大規模化したら
+    候補生成を埋め込み検索に差し替える）。
+
+    Args:
+        pages: {"id","content"} を持つ全ページ。
+        threshold: 候補とみなす最小重なり率。
+
+    Returns:
+        (id_a, id_b, overlap) のリスト。
+    """
+    ids = [str(p.get("id", "")) for p in pages]
+    texts = [str(p.get("content", "")) for p in pages]
+    pairs: list[tuple[str, str, float]] = []
+    for i in range(len(pages)):
+        for j in range(i + 1, len(pages)):
+            ratio = overlap_ratio(texts[i], texts[j])
+            if ratio >= threshold:
+                pairs.append((ids[i], ids[j], ratio))
+    return pairs
+
+
+def build_proposals_from_content(
+    pages: list[dict[str, Any]], candidate_threshold: float = CANDIDATE_OVERLAP
+) -> list[dict[str, Any]]:
+    """本文の総当たり比較で候補ペアを作り、そのまま提案を組み立てる（意味検索なし経路）。"""
+    pairs = candidate_pairs_from_content(pages, candidate_threshold)
+    return build_proposals(pages, pairs, min_score=candidate_threshold)
+
+
+def main(pages: list[dict[str, Any]], pairs: Any = None) -> dict[str, list[dict[str, Any]]]:
     """Dify Code ノード用エントリ。
+
+    `pairs` が与えられればそれを使い（Knowledge Retrieval 経路）、空なら本文総当たりで
+    候補ペアを生成する（difflib 経路）。どちらも同じ提案組立に合流する。
 
     Args:
         pages: Wiki 全ページ（{"id","title","path","content"}）。
-        pairs: Knowledge Retrieval 等で得た類似候補ペア。
+        pairs: 類似候補ペア（無ければ本文から自動生成）。
 
     Returns:
         {"proposals": [...]}。後続の対話で承認 → LLM 統合 → upsert/退役 する。
     """
-    return {"proposals": build_proposals(pages or [], pairs or [])}
+    pages = pages or []
+    if pairs:
+        return {"proposals": build_proposals(pages, pairs)}
+    return {"proposals": build_proposals_from_content(pages)}

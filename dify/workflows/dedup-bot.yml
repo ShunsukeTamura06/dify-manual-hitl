@@ -1,0 +1,621 @@
+# 重複排除Bot（提案フロー v1: ①解析→②提案→③提示）— HITL「提案→承認→実行」の前半
+# Wiki の既存ページを走査し、重複クラスタを検出して「高確信=一括 / 要確認=個別」に振り分けて提示する。
+# 候補ペアは本文の総当たり difflib で決定的に生成（意味検索は大規模化時に差し替え）。
+# 検出・提案組立ロジックは dify/dedup/dedup/clustering.py と同一（ローカル単体テスト済み）。
+#
+# v1 は③提示まで。④承認→⑤統合(LLM統合→upsert/退役)は次スライス。
+# インポート後の環境合わせ: environment_variables.DOCSTORE_URL。
+app:
+  description: '重複排除Bot. Wikiの重複ページを検出し、統合候補を確信度つきで提案する（v1 提示まで）。'
+  icon: 🧹
+  icon_background: '#EDE9FE'
+  mode: advanced-chat
+  name: 重複排除Bot
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.4.0
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - description: ''
+    id: 1174e719-482b-4749-aead-1056eb332db0
+    name: DOCSTORE_URL
+    selector:
+    - env
+    - DOCSTORE_URL
+    value: http://docstore-growi:8001
+    value_type: string
+  features:
+    file_upload:
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 1
+    opening_statement: '重複チェックしたい範囲のパス接頭辞を送ってください（例: /manuals/dedup-test）。
+
+      省略すると /manuals 全体を対象にします。重複候補を確信度つきで提案します（統合の実行は次段）。
+
+      '
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: code
+      id: e_start_scope
+      source: start
+      sourceHandle: source
+      target: scope
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: e_scope_list
+      source: scope
+      sourceHandle: source
+      target: http_list
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: e_list_parse
+      source: http_list
+      sourceHandle: source
+      target: parse_list
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: iteration
+      id: e_parse_iter
+      source: parse_list
+      sourceHandle: source
+      target: iter_content
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_content
+        sourceType: iteration-start
+        targetType: http-request
+      id: e_iterstart_get
+      source: iter_contentstart
+      sourceHandle: source
+      target: get_content
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: iteration
+        targetType: code
+      id: e_iter_build
+      source: iter_content
+      sourceHandle: source
+      target: build
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: code
+      id: e_build_format
+      source: build
+      sourceHandle: source
+      target: format
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: e_format_answer
+      source: format
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: 開始
+        type: start
+        variables: []
+      height: 54
+      id: start
+      position:
+        x: 80
+        y: 282
+      positionAbsolute:
+        x: 80
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: |
+
+          def main(query: str) -> dict:
+              q = (query or "").strip()
+              prefix = "/manuals"
+              for tok in q.split():
+                  if tok.startswith("/"):
+                      prefix = tok
+                      break
+              return {"prefix": prefix}
+        code_language: python3
+        desc: 対象パス接頭辞を決める（既定 /manuals）
+        outputs:
+          prefix:
+            children: null
+            type: string
+        selected: false
+        title: 対象範囲
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          variable: query
+      height: 54
+      id: scope
+      position:
+        x: 360
+        y: 282
+      positionAbsolute:
+        x: 360
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: ''
+          type: none
+        desc: Wiki 全ページの一覧を取得
+        headers: ''
+        method: get
+        params: ''
+        selected: false
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        title: ページ一覧取得
+        type: http-request
+        url: '{{#env.DOCSTORE_URL#}}/pages?limit=500'
+        variables: []
+      height: 120
+      id: http_list
+      position:
+        x: 640
+        y: 282
+      positionAbsolute:
+        x: 640
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: |
+
+          import json
+
+          def main(body, prefix: str) -> dict:
+              try:
+                  d = json.loads(body) if isinstance(body, str) else (body or {})
+              except Exception:
+                  d = {}
+              pages = d.get("pages", []) if isinstance(d, dict) else []
+              prefix = prefix or "/manuals"
+              ids = []
+              metas = []
+              for p in pages:
+                  if not isinstance(p, dict):
+                      continue
+                  path = str(p.get("path", ""))
+                  pid = str(p.get("id", ""))
+                  if not pid or not path.startswith(prefix):
+                      continue
+                  ids.append(pid)
+                  metas.append({"id": pid, "title": str(p.get("title", "")), "path": path})
+              return {"page_ids": ids, "metas": metas}
+        code_language: python3
+        desc: 接頭辞でフィルタしページIDとメタを出す（30件上限に注意）
+        outputs:
+          metas:
+            children: null
+            type: array[object]
+          page_ids:
+            children: null
+            type: array[string]
+        selected: false
+        title: 一覧フィルタ
+        type: code
+        variables:
+        - value_selector:
+          - http_list
+          - body
+          variable: body
+        - value_selector:
+          - scope
+          - prefix
+          variable: prefix
+      height: 54
+      id: parse_list
+      position:
+        x: 920
+        y: 282
+      positionAbsolute:
+        x: 920
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        error_handle_mode: terminated
+        height: 200
+        is_parallel: false
+        iterator_input_type: array[string]
+        iterator_selector:
+        - parse_list
+        - page_ids
+        output_selector:
+        - get_content
+        - body
+        output_type: array[string]
+        parallel_nums: 3
+        selected: false
+        start_node_id: iter_contentstart
+        title: 各ページ本文取得
+        type: iteration
+        width: 420
+      height: 200
+      id: iter_content
+      position:
+        x: 1200
+        y: 282
+      positionAbsolute:
+        x: 1200
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 420
+      zIndex: 1
+    - data:
+        desc: ''
+        isInIteration: true
+        selected: false
+        title: ''
+        type: iteration-start
+      draggable: false
+      height: 48
+      id: iter_contentstart
+      parentId: iter_content
+      position:
+        x: 24
+        y: 80
+      positionAbsolute:
+        x: 1224
+        y: 362
+      selectable: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-iteration-start
+      width: 44
+      zIndex: 1002
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{"page_id": "{{#iter_content.item#}}"}'
+          type: raw-text
+        desc: ''
+        headers: Content-Type:application/json
+        isInIteration: true
+        isInLoop: false
+        iteration_id: iter_content
+        method: post
+        params: ''
+        selected: false
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        title: 本文取得
+        type: http-request
+        url: '{{#env.DOCSTORE_URL#}}/pages/get-content'
+        variables: []
+      height: 120
+      id: get_content
+      parentId: iter_content
+      position:
+        x: 120
+        y: 70
+      positionAbsolute:
+        x: 1320
+        y: 352
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+      zIndex: 1002
+    - data:
+        code: |
+
+          import json
+          import difflib
+
+          HIGH_OVERLAP = 0.8
+          CANDIDATE_OVERLAP = 0.5
+
+          def _norm(text):
+              return " ".join((text or "").split())
+
+          def overlap_ratio(a, b):
+              return difflib.SequenceMatcher(None, _norm(a), _norm(b)).ratio()
+
+          def cluster_min_overlap(texts):
+              if len(texts) < 2:
+                  return 1.0
+              worst = 1.0
+              for i in range(len(texts)):
+                  for j in range(i + 1, len(texts)):
+                      worst = min(worst, overlap_ratio(texts[i], texts[j]))
+              return worst
+
+          def _build_clusters(ids, pairs, min_score):
+              parent = {i: i for i in ids}
+              def find(x):
+                  while parent[x] != x:
+                      parent[x] = parent[parent[x]]
+                      x = parent[x]
+                  return x
+              def union(a, b):
+                  ra, rb = find(a), find(b)
+                  if ra != rb:
+                      parent[ra] = rb
+              for a, b, score in pairs:
+                  if a in parent and b in parent and score >= min_score:
+                      union(a, b)
+              groups = {}
+              for i in ids:
+                  groups.setdefault(find(i), []).append(i)
+              clusters = [g for g in groups.values() if len(g) >= 2]
+              clusters.sort(key=lambda g: ids.index(g[0]))
+              return clusters
+
+          def classify_confidence(min_overlap, titles_agree):
+              if min_overlap >= HIGH_OVERLAP and titles_agree:
+                  return "high"
+              return "review"
+
+          def build_proposals(pages, pairs, min_score):
+              by_id = {str(p.get("id", "")): p for p in pages}
+              ids = [str(p.get("id", "")) for p in pages]
+              clusters = _build_clusters(ids, pairs, min_score)
+              proposals = []
+              for n, cluster in enumerate(clusters, start=1):
+                  members = [by_id[i] for i in cluster if i in by_id]
+                  texts = [str(m.get("content", "")) for m in members]
+                  titles = [str(m.get("title", "")) for m in members]
+                  min_ov = cluster_min_overlap(texts)
+                  titles_agree = len({_norm(t) for t in titles if t}) == 1
+                  confidence = classify_confidence(min_ov, titles_agree)
+                  rep = max(members, key=lambda m: len(str(m.get("content", ""))))
+                  proposals.append({
+                      "cluster_id": n,
+                      "page_ids": [str(m.get("id", "")) for m in members],
+                      "titles": titles,
+                      "representative_title": str(rep.get("title", "")),
+                      "representative_path": str(rep.get("path", "")),
+                      "min_overlap": round(min_ov, 3),
+                      "confidence": confidence,
+                      "lane": "bulk" if confidence == "high" else "individual",
+                  })
+              return proposals
+
+          def candidate_pairs_from_content(pages, threshold):
+              ids = [str(p.get("id", "")) for p in pages]
+              texts = [str(p.get("content", "")) for p in pages]
+              pairs = []
+              for i in range(len(pages)):
+                  for j in range(i + 1, len(pages)):
+                      ratio = overlap_ratio(texts[i], texts[j])
+                      if ratio >= threshold:
+                          pairs.append((ids[i], ids[j], ratio))
+              return pairs
+
+          def main(metas, contents) -> dict:
+              metas = metas or []
+              contents = contents or []
+              pages = []
+              for i, m in enumerate(metas):
+                  raw = contents[i] if i < len(contents) else ""
+                  try:
+                      cj = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                  except Exception:
+                      cj = {}
+                  content = cj.get("content", "") if isinstance(cj, dict) else ""
+                  pages.append({
+                      "id": str(m.get("id", "")),
+                      "title": str(m.get("title", "")),
+                      "path": str(m.get("path", "")),
+                      "content": str(content),
+                  })
+              pairs = candidate_pairs_from_content(pages, CANDIDATE_OVERLAP)
+              return {"proposals": build_proposals(pages, pairs, CANDIDATE_OVERLAP)}
+        code_language: python3
+        desc: 本文総当たりで候補ペア→クラスタ→確信度→提案を組み立てる
+        outputs:
+          proposals:
+            children: null
+            type: array[object]
+        selected: false
+        title: 重複提案を組み立て
+        type: code
+        variables:
+        - value_selector:
+          - parse_list
+          - metas
+          variable: metas
+        - value_selector:
+          - iter_content
+          - output
+          variable: contents
+      height: 54
+      id: build
+      position:
+        x: 1720
+        y: 282
+      positionAbsolute:
+        x: 1720
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: |
+
+          def main(proposals) -> dict:
+              proposals = proposals or []
+              bulk = [p for p in proposals if p.get("lane") == "bulk"]
+              review = [p for p in proposals if p.get("lane") != "bulk"]
+              lines = []
+              lines.append("重複候補を " + str(len(proposals)) + " クラスタ検出しました。")
+              lines.append("")
+              if bulk:
+                  lines.append("【高確信・一括承認候補】(" + str(len(bulk)) + "件)")
+                  for p in bulk:
+                      lines.append("- 「" + str(p.get("representative_title", "")) + "」 重複 "
+                                   + str(len(p.get("page_ids", []))) + "ページ (重なり "
+                                   + str(round(p.get("min_overlap", 0) * 100)) + "%)")
+                      for t in p.get("titles", []):
+                          lines.append("    ・" + str(t))
+                  lines.append("")
+              if review:
+                  lines.append("【要確認・個別承認】(" + str(len(review)) + "件)")
+                  for p in review:
+                      lines.append("- 「" + str(p.get("representative_title", "")) + "」 類似 "
+                                   + str(len(p.get("page_ids", []))) + "ページ (重なり "
+                                   + str(round(p.get("min_overlap", 0) * 100)) + "%, 要確認)")
+                      for t in p.get("titles", []):
+                          lines.append("    ・" + str(t))
+                  lines.append("")
+              if not proposals:
+                  lines.append("(重複候補は見つかりませんでした)")
+              lines.append("※ これは提案です。統合の実行は次段（承認→LLM統合→反映）で行います。")
+              return {"text": "\n".join(lines)}
+        code_language: python3
+        desc: 提案をlane別に読みやすく整形
+        outputs:
+          text:
+            children: null
+            type: string
+        selected: false
+        title: 提案を整形
+        type: code
+        variables:
+        - value_selector:
+          - build
+          - proposals
+          variable: proposals
+      height: 54
+      id: format
+      position:
+        x: 2000
+        y: 282
+      positionAbsolute:
+        x: 2000
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '{{#format.text#}}'
+        desc: ''
+        selected: false
+        title: 提案を返す
+        type: answer
+        variables: []
+      height: 120
+      id: answer
+      position:
+        x: 2280
+        y: 282
+      positionAbsolute:
+        x: 2280
+        y: 282
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7
+  rag_pipeline_variables: []

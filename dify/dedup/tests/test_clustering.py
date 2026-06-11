@@ -9,6 +9,8 @@
 
 from dedup.clustering import (
     build_proposals,
+    build_proposals_from_content,
+    candidate_pairs_from_content,
     classify_confidence,
     cluster_min_overlap,
     main,
@@ -123,3 +125,39 @@ def test_main_wrapper_shape() -> None:
 
 def test_main_handles_empty() -> None:
     assert main([], []) == {"proposals": []}
+
+
+def test_candidate_pairs_from_content() -> None:
+    # 同内容ペアは候補に、無関係は除外
+    pages = [
+        _page("a", "T", "経費精算の手順について詳しく説明します。" * 5),
+        _page("b", "T", "経費精算の手順について詳しく説明します。" * 5),
+        _page("c", "U", "全く無関係な休暇申請のZZ内容。" * 5),
+    ]
+    pairs = candidate_pairs_from_content(pages)
+    got = {frozenset((a, b)) for a, b, _ in pairs}
+    assert frozenset(("a", "b")) in got
+    assert frozenset(("a", "c")) not in got
+
+
+def test_build_proposals_from_content_end_to_end() -> None:
+    # 意味検索なしで、本文総当たり → クラスタ → 提案 まで通る（部署違いの同名重複を模す）
+    body = "国内出張の交通費を精算する手順。経路と金額を入力し領収書を添付して申請する。" * 4
+    pages = [
+        _page("soumu", "国内出張の交通費を精算する", body, path="/manuals/総務/_howto/x"),
+        _page("jinji", "国内出張の交通費を精算する", body, path="/manuals/人事部/_howto/x"),
+        _page("eigyo", "国内出張の交通費を精算する", body, path="/manuals/営業部/_howto/x"),
+        _page("other", "休暇を申請する", "休暇申請は別系統。全く異なる内容ZZ。" * 4),
+    ]
+    props = build_proposals_from_content(pages)
+    assert len(props) == 1  # 3つの同名重複が1クラスタ、無関係は除外
+    p = props[0]
+    assert set(p["page_ids"]) == {"soumu", "jinji", "eigyo"}
+    assert p["confidence"] == "high" and p["lane"] == "bulk"
+
+
+def test_main_auto_generates_pairs_when_absent() -> None:
+    body = "同一の本文。" * 20
+    pages = [_page("a", "T", body), _page("b", "T", body)]
+    out = main(pages)  # pairs 省略 → 本文から自動生成
+    assert len(out["proposals"]) == 1

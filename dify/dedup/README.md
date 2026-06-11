@@ -40,8 +40,23 @@ uv run mypy dedup
 
 承認負荷を抑え、人の判断を本当に必要な数件に絞るための振り分け。閾値 `HIGH_OVERLAP` で調整。
 
+## 候補ペアの取得（v1 は difflib、将来は意味検索）
+
+- **v1（実装済み）**: 本文の総当たり difflib（`candidate_pairs_from_content`）。意味検索なしで
+  決定的・文書非依存。中規模コーパス向け（O(n^2)）。
+- **将来（大規模化時）**: Dify Knowledge Retrieval で候補ペアを生成して `build_proposals` に渡す
+  経路に差し替え（`main` は pairs が与えられればそれを使う）。
+
 ## 実装状態
 
-- ✅ 決定的コア（クラスタリング・確信度・提案組立）＋単体テスト。
-- ⬜ Dify 配線（Knowledge Retrieval→Code→対話承認→LLM 統合→Adapter upsert/退役）と実機検証。
+- ✅ 決定的コア（クラスタリング・確信度・提案組立）＋単体テスト（17 件）。
+- ✅ Dify 配線 v1＝**提示まで**（[../workflows/dedup-bot.yml](../workflows/dedup-bot.yml)）。
+  ローカル Dify + 実 GROWI で一気通貫検証済み: 一覧取得→接頭辞フィルタ→各本文取得(Iteration)
+  →提案組立→lane 別提示。意図した重複コーパス（同名3＝高確信/一括、同内容別名2＝要確認/個別、
+  無関係2＝除外）で期待どおりの振り分けを確認。
+- ⬜ ④承認→⑤実行（対話で承認 → LLM 統合 → Adapter upsert/退役）。← 次スライス。
 - ⬜ 統合本文生成プロンプト（欠落ゼロ・矛盾注記）と完全性チェック。
+
+> Dify Code ノードの配列出力 30 要素上限のため、v1 は対象を接頭辞でスコープして 30 ページ
+> 以下にする想定。全社規模では一覧フィルタ側でのページング/分割か、Dify 側の
+> `CODE_MAX_*_ARRAY_LENGTH` 引き上げが要る（デプロイ要件）。
