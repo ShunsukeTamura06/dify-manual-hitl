@@ -56,8 +56,12 @@ def _viewer_url(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}{path}"
 
 
-def _extract_revision_id(growi_page: dict[str, Any]) -> str:
-    """GROWI ページから revision ID を取り出す。"""
+def extract_revision_id(growi_page: dict[str, Any]) -> str:
+    """GROWI ページから revision ID を取り出す。
+
+    GROWI はエンドポイント/バージョンにより revision を dict（{_id, body}）でも
+    文字列（ID のみ）でも返すため、両形式を受ける。
+    """
     revision = growi_page.get("revision")
     if isinstance(revision, dict):
         return str(revision.get("_id", ""))
@@ -86,7 +90,7 @@ def growi_to_page(growi_page: dict[str, Any], base_url: str) -> Page:
         title=metadata.get("title") or _title_from_path(path),
         content=content,
         metadata=metadata,
-        version=_extract_revision_id(growi_page),
+        version=extract_revision_id(growi_page),
         created_at=_parse_dt(growi_page.get("createdAt")),
         updated_at=_parse_dt(growi_page.get("updatedAt")) or datetime.now(),
         viewer_url=_viewer_url(base_url, path),
@@ -107,19 +111,33 @@ def growi_to_page_meta(growi_page: dict[str, Any], base_url: str) -> PageMeta:
         id=str(growi_page.get("_id", "")),
         path=path,
         title=metadata.get("title") or _title_from_path(path),
-        version=_extract_revision_id(growi_page),
+        version=extract_revision_id(growi_page),
         updated_at=_parse_dt(growi_page.get("updatedAt")) or datetime.now(),
         viewer_url=_viewer_url(base_url, path),
         metadata=metadata,
     )
 
 
-def page_to_growi_body(content: str, metadata: dict[str, Any]) -> str:
-    """DocStore の content + metadata → GROWI に保存する Markdown 本文。
+def page_to_growi_body(
+    content: str, metadata: dict[str, Any], title: str | None = None
+) -> str:
+    """DocStore の content + metadata (+ title) → GROWI に保存する Markdown 本文。
 
-    メタデータを frontmatter として本文先頭に埋め込む。
+    content に既に frontmatter があればマージする（リクエストの metadata が優先。
+    二重 frontmatter を作らない）。title は frontmatter に無い場合のみ補う
+    （契約の title フィールドを本文へ反映するため）。変更が無ければ content を
+    そのまま返し、元の書式を保つ。
     """
-    if not metadata:
+    try:
+        post = frontmatter.loads(content)
+        existing = dict(post.metadata)
+        body = post.content
+    except Exception:
+        existing, body = {}, content
+
+    merged = {**existing, **metadata}
+    if title and not merged.get("title"):
+        merged["title"] = title
+    if merged == existing:
         return content
-    post = frontmatter.Post(content, **metadata)
-    return frontmatter.dumps(post)
+    return frontmatter.dumps(frontmatter.Post(body, **merged))

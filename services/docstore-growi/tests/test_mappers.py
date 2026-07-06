@@ -97,6 +97,32 @@ def test_page_to_growi_body_no_metadata() -> None:
     assert body == content
 
 
+def test_page_to_growi_body_injects_title() -> None:
+    # 契約の title フィールドは frontmatter に反映される（title 喪失防止）
+    body = page_to_growi_body("# 本文", {"type": "howto"}, title="経費精算の手順")
+    page = growi_to_page(_sample_growi_page(body), BASE_URL)
+    assert page.title == "経費精算の手順"
+    assert page.metadata["type"] == "howto"
+
+
+def test_page_to_growi_body_title_does_not_override_frontmatter() -> None:
+    # content の frontmatter に title があればそちらが優先
+    content = "---\ntitle: 元のタイトル\n---\n本文"
+    body = page_to_growi_body(content, {}, title="別のタイトル")
+    assert body == content  # 変更なし＝元の書式のまま
+
+
+def test_page_to_growi_body_merges_existing_frontmatter() -> None:
+    # content に frontmatter があっても二重にならず、metadata とマージされる
+    content = "---\ntitle: タイトル\ntype: howto\n---\n本文"
+    body = page_to_growi_body(content, {"status": "draft"})
+    assert body.count("---") == 2
+    page = growi_to_page(_sample_growi_page(body), BASE_URL)
+    assert page.metadata["type"] == "howto"
+    assert page.metadata["status"] == "draft"
+    assert page.title == "タイトル"
+
+
 def test_datetime_parsing() -> None:
     page = growi_to_page(_sample_growi_page("本文"), BASE_URL)
     assert page.updated_at.year == 2026

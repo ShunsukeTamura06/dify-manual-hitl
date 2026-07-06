@@ -262,6 +262,36 @@ def test_upsert_updates_when_target(client: TestClient) -> None:
 
 
 @respx.mock
+def test_update_page_with_string_revision(client: TestClient) -> None:
+    """GROWI が revision を文字列で返す形でも更新できる（バージョン差対応）。"""
+    single = {
+        "page": {
+            "_id": "65a1b2c3d4e5f60001",
+            "path": "/manuals/x",
+            "updatedAt": "2026-06-10T00:00:00.000Z",
+            "revision": "rev-str-111",  # dict でなく文字列
+        }
+    }
+    respx.get(f"{GROWI_BASE}/_api/v3/page").mock(
+        return_value=httpx.Response(200, json=single)
+    )
+    put_route = respx.put(f"{GROWI_BASE}/_api/v3/page").mock(
+        return_value=httpx.Response(200, json={
+            "page": {"_id": "65a1b2c3d4e5f60001", "path": "/manuals/x",
+                     "updatedAt": "2026-06-10T00:00:00.000Z",
+                     "revision": {"_id": "rev-str-222", "body": "更新後"}}})
+    )
+
+    resp = client.put(
+        "/pages/65a1b2c3d4e5f60001",
+        json={"content": "# 更新後", "metadata": {}},
+    )
+    assert resp.status_code == 200
+    sent = put_route.calls[0].request.content.decode()
+    assert "rev-str-111" in sent  # 文字列 revision がそのまま楽観ロックに使われる
+
+
+@respx.mock
 def test_health_reports_growi_reachable(client: TestClient) -> None:
     respx.get(f"{GROWI_BASE}/_api/v3/healthcheck").mock(
         return_value=httpx.Response(200, json={"status": "ok"})

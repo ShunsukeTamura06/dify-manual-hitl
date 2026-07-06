@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ..deps import get_growi_client
 from ..growi_client import GrowiClient, GrowiError
 from ..mappers import (
+    extract_revision_id,
     growi_to_page,
     growi_to_page_meta,
     page_to_growi_body,
@@ -59,7 +60,7 @@ async def upsert_page(
     登録 Bot のチャットフローに IF/ELSE を持たせず一直線にするためのエンドポイント。
     """
     settings = get_settings()
-    body = page_to_growi_body(req.content, req.metadata)
+    body = page_to_growi_body(req.content, req.metadata, req.title)
 
     if req.target_page_id:
         # 更新: 現在リビジョンを取得して PUT
@@ -70,8 +71,7 @@ async def upsert_page(
                 raise HTTPException(status_code=404, detail="更新対象が見つかりません") from exc
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         cur_page = current.get("page", current)
-        rev = cur_page.get("revision")
-        cur_rev = str(rev.get("_id", "")) if isinstance(rev, dict) else str(rev or "")
+        cur_rev = extract_revision_id(cur_page)
         try:
             data = await growi.update_page(
                 page_id=req.target_page_id, body=body, revision_id=cur_rev
@@ -148,7 +148,7 @@ async def create_page(
 ) -> Page:
     """ページを新規作成する。"""
     settings = get_settings()
-    body = page_to_growi_body(req.content, req.metadata)
+    body = page_to_growi_body(req.content, req.metadata, req.title)
     try:
         data = await growi.create_page(path=req.path, body=body)
     except GrowiError as exc:
@@ -178,10 +178,7 @@ async def update_page(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     current_page = current.get("page", current)
-    current_rev = ""
-    revision = current_page.get("revision")
-    if isinstance(revision, dict):
-        current_rev = str(revision.get("_id", ""))
+    current_rev = extract_revision_id(current_page)
 
     # expected_version チェック（楽観ロック）
     if req.expected_version is not None and req.expected_version != current_rev:
@@ -190,7 +187,7 @@ async def update_page(
             detail="バージョンが一致しません（他者が更新した可能性）",
         )
 
-    body = page_to_growi_body(req.content, req.metadata)
+    body = page_to_growi_body(req.content, req.metadata, req.title)
     try:
         data = await growi.update_page(
             page_id=page_id,
@@ -213,10 +210,7 @@ async def delete_page(
     try:
         current = await growi.get_page(page_id)
         current_page = current.get("page", current)
-        current_rev = ""
-        revision = current_page.get("revision")
-        if isinstance(revision, dict):
-            current_rev = str(revision.get("_id", ""))
+        current_rev = extract_revision_id(current_page)
         await growi.delete_page(page_id, revision_id=current_rev)
     except GrowiError as exc:
         if exc.status_code == 404:

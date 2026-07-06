@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..deps import get_growi_client
 from ..growi_client import GrowiClient, GrowiError
-from ..mappers import _parse_dt
+from ..mappers import _parse_dt, extract_revision_id
 from ..models import ChangeEvent, ChangeEventType, ChangeList
 
 router = APIRouter(tags=["changes"])
@@ -52,7 +52,7 @@ async def get_changes(
                         event_type=ChangeEventType.UPDATED,
                         page_id=str(p.get("_id", "")),
                         path=str(p.get("path", "")),
-                        version=_revision_id(p),
+                        version=extract_revision_id(p),
                         occurred_at=updated,
                     )
                 )
@@ -66,12 +66,3 @@ async def get_changes(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return ChangeList(changes=changes, next_since=newest)
-
-
-def _revision_id(growi_page: dict) -> str:
-    revision = growi_page.get("revision")
-    if isinstance(revision, dict):
-        return str(revision.get("_id", ""))
-    if isinstance(revision, str):
-        return revision
-    return ""
