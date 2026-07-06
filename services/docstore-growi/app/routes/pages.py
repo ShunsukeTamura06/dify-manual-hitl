@@ -46,7 +46,11 @@ async def get_content(
         return GetContentResponse(exists=False)
     page = growi_to_page(data.get("page", data), settings.growi_base_url)
     return GetContentResponse(
-        exists=True, content=page.content, title=page.title, viewer_url=page.viewer_url
+        exists=True,
+        content=page.content,
+        title=page.title,
+        viewer_url=page.viewer_url,
+        status=str(page.metadata.get("status", "")),
     )
 
 

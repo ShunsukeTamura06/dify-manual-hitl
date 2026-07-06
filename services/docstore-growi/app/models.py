@@ -105,6 +105,10 @@ class GetContentResponse(BaseModel):
     content: str = ""
     title: str = ""
     viewer_url: str = ""
+    status: str = Field(
+        default="",
+        description="既存ページの status（更新時に引き継ぐため。無ければ空）",
+    )
 
 
 class ChangeEventType(StrEnum):

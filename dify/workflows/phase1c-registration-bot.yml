@@ -562,7 +562,8 @@ workflow:
 
             - 既存があれば、新素材の情報を既存の構造に溶け込ませる（重複は1つに、矛盾は新素材を優先しつつ注記）。
 
-            - frontmatter を含む Markdown 本文そのものだけを出力。``` で囲まない。status: draft にする。'
+            - frontmatter を含む Markdown 本文そのものだけを出力。``` で囲まない。frontmatter に status
+            は書かない（後段が自動設定する: 新規は draft、更新は既存の status を維持）。'
         - role: user
           text: '既存ページ(JSON):
 
@@ -582,11 +583,41 @@ workflow:
         y: 460
       type: custom
     - data:
-        code: "\nimport json\ndef main(target_page_id: str, path: str, title: str,\
-          \ content: str) -> dict:\n    body = json.dumps({\n        \"target_page_id\"\
-          : target_page_id or \"\",\n        \"path\": path, \"title\": title,\n \
-          \       \"content\": content, \"metadata\": {},\n    }, ensure_ascii=False)\n\
-          \    return {\"body\": body}\n"
+        # status は LLM に任せず、ここで決定的に設定する:
+        # 新規 → draft（人が GROWI で公開するまで検索に出さない = HITL）
+        # 更新 → 既存ページの status を維持（公開済みを draft に戻して検索から消さない）
+        code: |
+
+          import json
+
+          def main(target_page_id: str, path: str, title: str, content: str, existing_json: str) -> dict:
+              try:
+                  existing_status = str((json.loads(existing_json or "{}") or {}).get("status", ""))
+              except Exception:
+                  existing_status = ""
+              desired = existing_status if (target_page_id or "") else "draft"
+
+              lines = content.split("\n")
+              if lines and lines[0].strip() == "---":
+                  # 既存 frontmatter 内の status 行を置き換える
+                  try:
+                      end = lines[1:].index("---") + 1
+                  except ValueError:
+                      end = -1
+                  if end > 0:
+                      fm = [ln for ln in lines[1:end] if not ln.strip().startswith("status:")]
+                      if desired:
+                          fm.append(f"status: {desired}")
+                      content = "\n".join(["---"] + fm + lines[end:])
+              elif desired:
+                  content = f"---\nstatus: {desired}\n---\n{content}"
+
+              body = json.dumps({
+                  "target_page_id": target_page_id or "",
+                  "path": path, "title": title,
+                  "content": content, "metadata": {},
+              }, ensure_ascii=False)
+              return {"body": body}
         code_language: python3
         outputs:
           body:
@@ -610,6 +641,10 @@ workflow:
           - merge_llm
           - text
           variable: content
+        - value_selector:
+          - http_getcontent
+          - body
+          variable: existing_json
       id: build_upsert
       position:
         x: 2640

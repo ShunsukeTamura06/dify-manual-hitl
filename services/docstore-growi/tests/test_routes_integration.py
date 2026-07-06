@@ -210,7 +210,9 @@ def test_get_content_empty_id_returns_empty(client: TestClient) -> None:
     """page_id 空（新規ケース）はエラーにせず exists=False を返す。"""
     resp = client.post("/pages/get-content", json={"page_id": ""})
     assert resp.status_code == 200
-    assert resp.json() == {"exists": False, "content": "", "title": "", "viewer_url": ""}
+    assert resp.json() == {
+        "exists": False, "content": "", "title": "", "viewer_url": "", "status": ""
+    }
 
 
 @respx.mock
@@ -223,6 +225,7 @@ def test_get_content_returns_existing(client: TestClient) -> None:
     assert body["exists"] is True
     assert "# 手順" in body["content"]
     assert body["title"] == "国内出張の経費精算"
+    assert body["status"] == "published"  # 更新時に status を引き継ぐための情報
 
 
 @respx.mock
