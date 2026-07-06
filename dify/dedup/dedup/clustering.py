@@ -24,6 +24,11 @@ HIGH_OVERLAP = 0.8
 # HIGH_OVERLAP より低くし、0.5〜0.8 の「似ているが要確認」も候補に含める。
 CANDIDATE_OVERLAP = 0.5
 
+# タイトルが「一致」とみなす平均ペア類似度。実運用のタイトルは表記揺れが普通
+# （「宿泊費を精算する/宿泊費精算/宿泊費の申請」等）なので完全一致は要求しない。
+# 無関係なタイトル同士（実測 0.4 前後以下）を弾ける水準として 0.5。
+TITLE_AGREE_OVERLAP = 0.5
+
 
 def _norm(text: str) -> str:
     """重なり比較用の正規化（前後空白除去・内部空白圧縮）。"""
@@ -85,10 +90,29 @@ def _build_clusters(
     return clusters
 
 
+def titles_similarity(titles: list[str]) -> float:
+    """タイトル群の平均ペア類似度（0.0〜1.0）を返す。
+
+    正規化後の difflib 比較。完全一致でなく類似度で測るのは、実運用の重複ページは
+    タイトルが表記揺れしているのが普通なため（一致要求だと bulk レーンが発火しない）。
+    タイトルが 1 件以下（または全部空）なら 1.0（判定材料なし＝タイトルでは弾かない）。
+    """
+    norm = [_norm(t) for t in titles if _norm(t)]
+    if len(norm) < 2:
+        return 1.0
+    total = 0.0
+    count = 0
+    for i in range(len(norm)):
+        for j in range(i + 1, len(norm)):
+            total += difflib.SequenceMatcher(None, norm[i], norm[j]).ratio()
+            count += 1
+    return total / count
+
+
 def classify_confidence(min_overlap: float, titles_agree: bool) -> str:
     """クラスタの確信度を返す（"high" or "review"）。
 
-    重なりが高く（HIGH_OVERLAP 以上）かつタイトルが一致するなら「明白な重複」とみなす。
+    重なりが高く（HIGH_OVERLAP 以上）かつタイトルが揃っているなら「明白な重複」とみなす。
     """
     if min_overlap >= HIGH_OVERLAP and titles_agree:
         return "high"
@@ -147,7 +171,7 @@ def build_proposals(
         texts = [str(m.get("content", "")) for m in members]
         titles = [str(m.get("title", "")) for m in members]
         min_ov = cluster_min_overlap(texts)
-        titles_agree = len({_norm(t) for t in titles if t}) == 1
+        titles_agree = titles_similarity(titles) >= TITLE_AGREE_OVERLAP
         confidence = classify_confidence(min_ov, titles_agree)
         # 基準ページ = 最も情報量の多い（content 最長）ページ。統合のベースにする。
         rep = max(members, key=lambda m: len(str(m.get("content", ""))))

@@ -418,6 +418,7 @@ workflow:
 
           HIGH_OVERLAP = 0.8
           CANDIDATE_OVERLAP = 0.5
+          TITLE_AGREE_OVERLAP = 0.5
 
           def _norm(text):
               return " ".join((text or "").split())
@@ -455,6 +456,17 @@ workflow:
               clusters.sort(key=lambda g: ids.index(g[0]))
               return clusters
 
+          def titles_similarity(titles):
+              norm = [_norm(t) for t in titles if _norm(t)]
+              if len(norm) < 2:
+                  return 1.0
+              total, count = 0.0, 0
+              for i in range(len(norm)):
+                  for j in range(i + 1, len(norm)):
+                      total += difflib.SequenceMatcher(None, norm[i], norm[j]).ratio()
+                      count += 1
+              return total / count
+
           def classify_confidence(min_overlap, titles_agree):
               if min_overlap >= HIGH_OVERLAP and titles_agree:
                   return "high"
@@ -470,7 +482,7 @@ workflow:
                   texts = [str(m.get("content", "")) for m in members]
                   titles = [str(m.get("title", "")) for m in members]
                   min_ov = cluster_min_overlap(texts)
-                  titles_agree = len({_norm(t) for t in titles if t}) == 1
+                  titles_agree = titles_similarity(titles) >= TITLE_AGREE_OVERLAP
                   confidence = classify_confidence(min_ov, titles_agree)
                   rep = max(members, key=lambda m: len(str(m.get("content", ""))))
                   proposals.append({

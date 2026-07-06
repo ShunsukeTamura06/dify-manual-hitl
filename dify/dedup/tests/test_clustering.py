@@ -8,6 +8,7 @@
 """
 
 from dedup.clustering import (
+    TITLE_AGREE_OVERLAP,
     build_proposals,
     build_proposals_from_content,
     candidate_pairs_from_content,
@@ -15,6 +16,7 @@ from dedup.clustering import (
     cluster_min_overlap,
     main,
     overlap_ratio,
+    titles_similarity,
 )
 
 
@@ -64,6 +66,32 @@ def test_high_confidence_when_overlap_high_and_titles_agree() -> None:
     assert len(props) == 1
     assert props[0]["confidence"] == "high"
     assert props[0]["lane"] == "bulk"
+
+
+def test_high_confidence_with_title_variants() -> None:
+    # 表記揺れしたタイトル（dedup-design.md の例）でも、内容がほぼ同じなら高確信。
+    # タイトルの完全一致は要求しない（実運用では bulk レーンが発火しなくなるため）。
+    body = "宿泊費の精算手順。金額と宿泊数を入力し、領収書を添付して申請する。" * 3
+    pages = [
+        _page("p3", "宿泊費を精算する", body + "（詳しい注記つき）"),
+        _page("p7", "宿泊費精算", body),
+        _page("p12", "宿泊費の申請", body),
+    ]
+    props = build_proposals(pages, [("p3", "p7", 0.9), ("p7", "p12", 0.9)])
+    assert len(props) == 1
+    assert props[0]["confidence"] == "high"
+    assert props[0]["lane"] == "bulk"
+
+
+def test_titles_similarity_thresholds() -> None:
+    # 表記揺れは閾値以上、無関係タイトルは閾値未満に落ちる
+    variants = ["宿泊費を精算する", "宿泊費精算", "宿泊費の申請"]
+    assert titles_similarity(variants) >= TITLE_AGREE_OVERLAP
+    unrelated = ["経費精算の手順", "勤怠を修正する"]
+    assert titles_similarity(unrelated) < TITLE_AGREE_OVERLAP
+    # 判定材料がなければタイトルでは弾かない
+    assert titles_similarity([]) == 1.0
+    assert titles_similarity(["単独"]) == 1.0
 
 
 def test_review_when_titles_disagree() -> None:
