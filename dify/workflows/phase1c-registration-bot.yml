@@ -375,7 +375,8 @@ workflow:
       type: custom
       width: 242
     - data:
-        answer: '処理が完了しました（status: draft）。GROWI で確認・公開してください。
+        answer: '処理が完了しました。新規の場合は下書き（draft）です。GROWI で内容を確認し、公開（status:
+          published）してください。既存ページの更新の場合は status は変わっていません。
 
 
           ## 類似ページ（重複の可能性・参考）

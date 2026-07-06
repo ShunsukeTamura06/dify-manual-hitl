@@ -767,7 +767,7 @@ workflow:
         \    if m:\n        title = m.group(1).strip()\n    if not title:\n        title = (fallback_title or \"\").strip() or \"無題ページ\"\n\
         \    if not path:\n        path = \"/manuals/未分類/_reference/\" + title\n    body = json.dumps({\n\
         \        \"target_page_id\": \"\",\n        \"path\": path,\n        \"title\": title,\n\
-        \        \"content\": md,\n        \"metadata\": {},\n    }, ensure_ascii=False)\n    return {\"body\": body, \"path\": path, \"title\": title}\n"
+        \        \"content\": md,\n        \"metadata\": {\"status\": \"draft\"},\n    }, ensure_ascii=False)\n    return {\"body\": body, \"path\": path, \"title\": title}\n"
         code_language: python3
         desc: frontmatter から path/title を取り出し upsert ボディを組む
         isInIteration: true

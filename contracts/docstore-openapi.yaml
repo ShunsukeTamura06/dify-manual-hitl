@@ -44,6 +44,11 @@ paths:
         - name: status
           in: query
           schema: { type: string, enum: [published, draft, deprecated] }
+          description: |
+            metadata.status での絞り込み（best-effort）。一覧 API が本文を返さない
+            Wiki（GROWI 等）では metadata を判定できず絞り込めない。また絞り込みは
+            ページング後に適用されるため、確実なフィルタが必要な呼び出し側
+            （Sync Service 等）は各ページ取得後に自前で判定すること。
         - name: cursor
           in: query
           schema: { type: string }
@@ -324,12 +329,18 @@ components:
           type: string
           nullable: true
 
+    # title / metadata と content 内 frontmatter の優先順位（create/update/upsert 共通）:
+    #   1. metadata のキーは content の frontmatter を上書きする（明示指定が最優先）
+    #   2. title は frontmatter に title が無い場合のフォールバック（上書きしない。
+    #      content の frontmatter が正。title を変えたいときは content か metadata で指定する）
     PageCreateRequest:
       type: object
       required: [path, title, content]
       properties:
         path: { type: string }
-        title: { type: string }
+        title:
+          type: string
+          description: content の frontmatter に title が無い場合のフォールバック
         content: { type: string }
         content_format:
           type: string
@@ -338,16 +349,20 @@ components:
         metadata:
           type: object
           additionalProperties: true
+          description: content の frontmatter とマージされる（こちらが優先）
 
     PageUpdateRequest:
       type: object
       required: [content]
       properties:
-        title: { type: string }
+        title:
+          type: string
+          description: content の frontmatter に title が無い場合のフォールバック
         content: { type: string }
         metadata:
           type: object
           additionalProperties: true
+          description: content の frontmatter とマージされる（こちらが優先）
         expected_version:
           type: string
           description: 楽観ロック用。指定するとバージョン不一致時に 409

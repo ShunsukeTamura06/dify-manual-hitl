@@ -112,6 +112,15 @@ def test_page_to_growi_body_title_does_not_override_frontmatter() -> None:
     assert body == content  # 変更なし＝元の書式のまま
 
 
+def test_page_to_growi_body_metadata_overrides_frontmatter() -> None:
+    # metadata は content の frontmatter を上書きする（明示指定が最優先）。
+    # 一括取り込み Bot が LLM 出力に関わらず status: draft を強制するのに使う。
+    content = "---\ntitle: T\nstatus: published\n---\n本文"
+    body = page_to_growi_body(content, {"status": "draft"})
+    page = growi_to_page(_sample_growi_page(body), BASE_URL)
+    assert page.metadata["status"] == "draft"
+
+
 def test_page_to_growi_body_merges_existing_frontmatter() -> None:
     # content に frontmatter があっても二重にならず、metadata とマージされる
     content = "---\ntitle: タイトル\ntype: howto\n---\n本文"
