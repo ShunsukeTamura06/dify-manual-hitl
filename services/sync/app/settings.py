@@ -29,6 +29,17 @@ class Settings(BaseSettings):
 
     # 同期挙動
     embed_source_header: bool = Field(default=True)
+    sync_exclude_statuses: str = Field(
+        default="draft,deprecated",
+        description="同期対象外とする metadata.status（カンマ区切り）。下書きを検索に出さない",
+    )
+
+    @property
+    def exclude_statuses(self) -> frozenset[str]:
+        """同期対象外ステータスの集合。"""
+        return frozenset(
+            s.strip().lower() for s in self.sync_exclude_statuses.split(",") if s.strip()
+        )
 
     # サービス自身
     port: int = Field(default=8002)

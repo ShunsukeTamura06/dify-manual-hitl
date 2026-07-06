@@ -8,6 +8,11 @@
 同期モード:
 - full: DocStore 全ページ vs Dify 全ドキュメントを突合（孤立削除も行う）
 - diff: DocStore /pages/changes の差分のみ反映
+
+status フィルタ:
+- metadata.status が exclude_statuses（既定: draft / deprecated）のページは同期しない。
+  登録 Bot が作る下書きは、人が GROWI で公開（HITL 承認）するまで検索に出さない。
+- 既に Dify にあるページが除外ステータスへ遷移した場合は Dify から削除する。
 """
 
 import logging
@@ -20,6 +25,9 @@ from .naming import build_document_text, decode_page_id, encode_doc_name
 
 logger = logging.getLogger(__name__)
 
+# 同期対象外とする metadata.status（承認前の下書き・退役ページは検索に出さない）
+DEFAULT_EXCLUDE_STATUSES = frozenset({"draft", "deprecated"})
+
 
 class SyncEngine:
     def __init__(
@@ -27,10 +35,12 @@ class SyncEngine:
         docstore: DocStoreClient,
         dify: DifyKnowledgeClient,
         embed_header: bool = True,
+        exclude_statuses: frozenset[str] | set[str] = DEFAULT_EXCLUDE_STATUSES,
     ) -> None:
         self._docstore = docstore
         self._dify = dify
         self._embed_header = embed_header
+        self._exclude_statuses = frozenset(exclude_statuses)
 
     async def _build_dify_index(self) -> dict[str, str]:
         """Dify の全ドキュメントから {page_id: document_id} マップを作る。"""
@@ -54,6 +64,24 @@ class SyncEngine:
             page = await self._docstore.get_page(page_id)
         except DocStoreError as exc:
             result.errors.append(f"get_page({page_id}) 失敗: {exc}")
+            return
+
+        # 除外ステータス（draft 等）は同期しない。既に Dify にあれば削除する
+        # （公開済みが下書きへ戻された場合も検索から消すため）。
+        status = str((page.get("metadata") or {}).get("status", "")).strip().lower()
+        if status in self._exclude_statuses:
+            existing = dify_index.get(page_id)
+            if not existing:
+                result.skipped += 1
+                return
+            if dry_run:
+                result.deleted += 1
+                return
+            try:
+                await self._dify.delete_document(existing)
+                result.deleted += 1
+            except DifyError as exc:
+                result.errors.append(f"delete({page_id}) 失敗: {exc}")
             return
 
         name = encode_doc_name(page_id, page.get("title", page_id))

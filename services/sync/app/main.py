@@ -76,7 +76,12 @@ def create_app() -> FastAPI:
         docstore = _make_docstore()
         dify = _make_dify()
         try:
-            engine = SyncEngine(docstore, dify, embed_header=settings.embed_source_header)
+            engine = SyncEngine(
+                docstore,
+                dify,
+                embed_header=settings.embed_source_header,
+                exclude_statuses=settings.exclude_statuses,
+            )
             if req.mode == "full":
                 return await engine.full_sync(dry_run=req.dry_run)
             assert req.since is not None

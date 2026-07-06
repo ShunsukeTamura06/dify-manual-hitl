@@ -62,14 +62,16 @@ class FakeDify:
         self.docs.pop(document_id, None)
 
 
-def _page(pid: str, title: str, content: str = "本文") -> dict[str, Any]:
+def _page(
+    pid: str, title: str, content: str = "本文", status: str = "published"
+) -> dict[str, Any]:
     return {
         "id": pid,
         "title": title,
         "path": f"/manuals/{title}",
         "content": content,
         "viewer_url": f"https://growi/{pid}",
-        "metadata": {"status": "published"},
+        "metadata": {"status": status} if status else {},
     }
 
 
@@ -151,6 +153,79 @@ async def test_full_sync_dry_run_writes_nothing() -> None:
 
     assert result.created == 1
     assert len(dify.docs) == 0  # 実際には書いていない
+
+
+@pytest.mark.asyncio
+async def test_full_sync_skips_draft_pages() -> None:
+    # 下書きは HITL 承認（GROWI で公開）まで Dify に入れない
+    docstore = FakeDocStore(
+        [_page("p1", "公開済み"), _page("p2", "下書き", status="draft")]
+    )
+    dify = FakeDify()
+    engine = SyncEngine(docstore, dify, embed_header=False)  # type: ignore[arg-type]
+
+    result = await engine.full_sync()
+
+    assert result.created == 1
+    assert result.skipped == 1
+    names = {d["name"] for d in dify.docs.values()}
+    assert encode_doc_name("p2", "下書き") not in names
+
+
+@pytest.mark.asyncio
+async def test_full_sync_removes_page_reverted_to_draft() -> None:
+    # 公開済み → draft に戻されたページは Dify から削除して検索から消す
+    docstore = FakeDocStore([_page("p1", "戻された", status="draft")])
+    dify = FakeDify([{"id": "d1", "name": encode_doc_name("p1", "戻された")}])
+    engine = SyncEngine(docstore, dify, embed_header=False)  # type: ignore[arg-type]
+
+    result = await engine.full_sync()
+
+    assert result.deleted == 1
+    assert "d1" not in dify.docs
+
+
+@pytest.mark.asyncio
+async def test_full_sync_skips_deprecated_pages() -> None:
+    # 退役ページ（重複統合で deprecated 化）も同期しない
+    docstore = FakeDocStore([_page("p1", "退役", status="deprecated")])
+    dify = FakeDify()
+    engine = SyncEngine(docstore, dify, embed_header=False)  # type: ignore[arg-type]
+
+    result = await engine.full_sync()
+
+    assert result.created == 0
+    assert result.skipped == 1
+
+
+@pytest.mark.asyncio
+async def test_full_sync_syncs_pages_without_status() -> None:
+    # frontmatter に status が無い既存ページは従来通り同期する（後方互換）
+    docstore = FakeDocStore([_page("p1", "status無し", status="")])
+    dify = FakeDify()
+    engine = SyncEngine(docstore, dify, embed_header=False)  # type: ignore[arg-type]
+
+    result = await engine.full_sync()
+
+    assert result.created == 1
+
+
+@pytest.mark.asyncio
+async def test_diff_sync_skips_draft_update_event() -> None:
+    # 差分同期でも draft の更新イベントは取り込まない
+    docstore = FakeDocStore(
+        pages=[_page("p1", "下書き", status="draft")],
+        changes=[
+            {"event_type": "updated", "page_id": "p1", "occurred_at": "2026-05-29T10:00:00Z"}
+        ],
+    )
+    dify = FakeDify()
+    engine = SyncEngine(docstore, dify, embed_header=False)  # type: ignore[arg-type]
+
+    result = await engine.diff_sync(since=datetime(2026, 5, 29, tzinfo=UTC))
+
+    assert result.created == 0
+    assert result.skipped == 1
 
 
 @pytest.mark.asyncio
