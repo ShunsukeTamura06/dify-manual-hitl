@@ -109,5 +109,8 @@ uv run mypy app
   運用（cron スクリプト側）または将来の拡張で対応。当面は `full` で代替可能。
 - **削除イベント**: DocStore Adapter 側が削除を検知できるかに依存する
   （GROWI Adapter は現状 recent ベースで削除を取りこぼす可能性 → `full` の孤立削除で補修）。
+- **status フィルタ**: `metadata.status` が `draft` / `deprecated` のページは同期しない
+  （`SYNC_EXCLUDE_STATUSES` で変更可）。下書きは人が GROWI で公開（HITL 承認）する
+  まで検索に出ない。公開済み→draft に戻すと Dify からも削除される。
 - **ネイティブメタデータ**: owner/canonical 等での Dify 検索フィルタは未対応。
   現状は本文冒頭にソースヘッダを埋め込む方式。Phase 2 で改善予定。

@@ -21,7 +21,7 @@
 
 ---
 
-## フロー全体（軽量版）
+## フロー全体（軽量版・実装済みの一直線フロー）
 
 ```
 [Start: ファイル添付 + 補足説明]
@@ -35,25 +35,27 @@
    ↓
 [Knowledge Retrieval] 類似ページを検索（重複の「気づき」用。ブロックしない）
    ↓
-[Answer: 整形結果 + 類似ページの提示]
-   「整形しました。似たページ: {title}（{url}）。
-    このまま下書きを作成しますか？ [はい/修正指示]」
-   ↓ （Conversation Variable に整形済みドラフトを保持）
-[IF: はい]
-   → [HTTP Request: POST docstore /pages]  （status: draft）
+[ルーティングLLM → get-content → マージLLM]（更新指示があれば既存とマージ。下記）
    ↓
-[Answer: 完了通知]
-   「GROWI に下書きを作成しました。確認して公開してください: {viewer_url}」
+[HTTP Request: POST docstore /pages/upsert]
+   status は Code ノードが決定的に設定（新規=draft / 更新=既存を維持）
+   ↓
+[Answer: 完了通知 + 類似ページの提示]
+   「GROWI に下書きを作成しました。確認して公開してください: {viewer_url}
+    似たページ: {title}（類似度 NN%）」
    ↓
 ─────────── ここから先は Dify の外 ───────────
-[ユーザーが GROWI で下書きをざっと見て公開]
+[ユーザーが GROWI で下書きをざっと見て公開（status: published に変更）]
    ↓
-[GROWI 更新 → Sync Service が Dify Knowledge に反映]（Phase 1b）
+[GROWI 更新 → Sync Service が Dify Knowledge に反映]（Phase 1b。draft は同期されない）
 ```
 
-当初案にあった「LLM-2 で NEW/UPDATE/DUPLICATE を判定してユーザーに選ばせる」
-重いダンスは**やめる**。重複は「似たページがあるよ」と提示するだけ。
-更新したい場合はユーザーが GROWI で既存ページを直接編集すればよい。
+設計判断（当初案からの変更）:
+- 「LLM-2 で NEW/UPDATE/DUPLICATE を判定してユーザーに選ばせる」重いダンスは**やめる**。
+  重複は「似たページがあるよ」と提示するだけ。
+- 当初案にあった**チャット内の「作成しますか？[はい]」確認ステップもやめ、一直線**にした。
+  書き込むのは draft（検索に出ない）なので、チャット内確認は冗長。HITL の承認は
+  「GROWI 上で確認して公開する」操作に一本化する（下の「HITL の位置づけ」）。
 
 ---
 
@@ -88,7 +90,11 @@
 
 ### Stage1（実装・テスト済み）— アダプタ
 - `POST /pages/upsert`: target_page_id があれば更新(PUT)、無ければ新規(POST)
-- `POST /pages/get-content`: 既存本文を返す（page_id 空は空文字 = 新規でも呼べる）
+- `POST /pages/get-content`: 既存本文 + status を返す（page_id 空は空文字 = 新規でも呼べる）
+
+**status の扱い（重要）**: 更新時に status を draft に戻さない。upsert ボディ組立の
+Code ノードが決定的に設定する — 新規は `draft`、更新は**既存ページの status を維持**
+（公開済みページの更新が検索から消える事故を防ぐ）。LLM には status を書かせない。
 
 ### Stage2（実装・実機検証済み）— チャットフロー（一直線で追加）
 実 Dify 1.9.2 + 実 GROWI で検証済み。既存「備品購入を申請する」に新素材を渡し
@@ -137,9 +143,10 @@ DSL は dify/workflows/phase1c-registration-bot.yml（実機からエクスポ�
 ## ドラフトの扱い
 
 - 登録 Bot が作るページは `status: draft`。
-- Sync Service は `status: published` のみ Dify に同期する（draft は検索に出さない）。
-  ※ この status フィルタは sync 側の拡張として 1b 検証後に追加する。
-- 公開は人間が GROWI で `status: published` に変更して行う。
+- Sync Service は `draft` / `deprecated` を同期しない（**実装済み**。
+  `SYNC_EXCLUDE_STATUSES` で注入可能。公開済み→draft に戻されたページは
+  Dify からも削除される）。status 無しの既存ページは従来通り同期（後方互換）。
+- 公開は人間が GROWI で `status: published` に変更して行う。これが HITL の承認操作。
 
 ---
 
@@ -161,9 +168,10 @@ DSL は dify/workflows/phase1c-registration-bot.yml（実機からエクスポ�
 
 1. **画像・図形を含むファイル**: Phase 2（Vision LLM 前処理）。1c はまずテキスト主体。
 2. **Document Extractor の Word/Excel 抽出品質**: 実ファイルで要確認（特に表）。
-3. **status フィルタ同期**: sync が draft を除外する拡張。
+3. ~~**status フィルタ同期**~~: ✅ 実装済み（sync の `SYNC_EXCLUDE_STATUSES`）。
 4. **質問 Bot への更新日表示・古さ警告の追加**: 1a プロンプト改訂。
-5. **HTTP Request ノードの認証**: docstore-growi を内部ネットワークでどう呼ぶか。
+5. ~~**HTTP Request ノードの認証**~~: ✅ 実装済み（Adapter の `ADAPTER_API_KEY` +
+   DSL の `DOCSTORE_API_KEY` 環境変数で `X-API-Key` を送る）。
 
 ---
 

@@ -10,6 +10,10 @@ info:
 
     このファイルが「真実の契約」。実装より先にここを更新する。
 
+    認証（オプトイン）: Adapter 側でキーを設定した場合、/health を除く
+    全エンドポイントで `X-API-Key` ヘッダを要求する（不一致は 401）。
+    キー未設定なら認証なし（ローカル開発用）。
+
 servers:
   - url: http://localhost:8001
     description: ローカル開発
@@ -175,6 +179,12 @@ paths:
       description: |
         Sync Service が定期バッチで呼ぶ。
         webhook が取りこぼした変更を補修するための保険ルート。
+
+        イベント種別の保証は Adapter の能力に依存する（best-effort）:
+        - GROWI Adapter は現状 `updated` のみ返す（GROWI の recent API が
+          削除・移動を報告しないため。作成も `updated` として現れる）。
+        - したがって **削除・移動の反映は full 同期（全件突合）が担保する**。
+          diff 同期だけを回し続けない運用にすること（例: 日次で full を併用）。
       parameters:
         - name: since
           in: query
@@ -184,6 +194,9 @@ paths:
         - name: include_deleted
           in: query
           schema: { type: boolean, default: true }
+          description: |
+            deleted イベントを含めるか。Adapter が削除検知に対応しない場合
+            （GROWI 等）は無視される（best-effort）。
       responses:
         '200':
           description: OK
@@ -362,6 +375,9 @@ components:
         content: { type: string }
         title: { type: string }
         viewer_url: { type: string, format: uri }
+        status:
+          type: string
+          description: 既存ページの status（更新時に引き継ぐため。無ければ空）
 
     ChangeEvent:
       type: object
