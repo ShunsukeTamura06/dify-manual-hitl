@@ -12,6 +12,11 @@
 #   ADAPTER_URL=http://localhost:8001 SYNC_URL=http://localhost:8002 \
 #     bash diagnostics/collect.sh
 #
+# 前提:
+#   - /debug 系は既定で無効。診断時はサービス側で DEBUG_ENDPOINTS_ENABLED=true にする。
+#   - サービスに API キー認証を設定している場合は ADAPTER_API_KEY / SYNC_API_KEY を
+#     環境変数で渡す（X-API-Key ヘッダとして送る。バンドルには記録しない）。
+#
 # 安全性:
 #   - シークレット（トークン/APIキー）は収集しない。
 #     env は「変数名と設定有無」だけを記録し、値は出さない。
@@ -31,17 +36,24 @@ mkdir -p "${OUT_DIR}"
 echo "診断バンドルを収集します -> ${OUT_DIR}"
 
 # curl ラッパー（失敗してもスクリプトは続行）
+# URL が ADAPTER_URL / SYNC_URL のどちら宛かで対応する X-API-Key を付ける（未設定なら付けない）
 fetch() {
   local label="$1" method="$2" url="$3" data="${4:-}"
   local outfile="${OUT_DIR}/${label}.json"
+  local -a auth_args=()
+  case "${url}" in
+    "${ADAPTER_URL}"*) [ -n "${ADAPTER_API_KEY:-}" ] && auth_args=(-H "X-API-Key: ${ADAPTER_API_KEY}") ;;
+    "${SYNC_URL}"*)    [ -n "${SYNC_API_KEY:-}" ]    && auth_args=(-H "X-API-Key: ${SYNC_API_KEY}") ;;
+  esac
   echo "  [${method}] ${url}  -> ${label}.json"
+  # ${auth_args[@]+...} は bash 3.2 + set -u で空配列を安全に展開するイディオム
   if [ "${method}" = "POST" ]; then
     curl -sS -m 60 -X POST "${url}" \
-      -H 'Content-Type: application/json' -d "${data}" \
+      -H 'Content-Type: application/json' ${auth_args[@]+"${auth_args[@]}"} -d "${data}" \
       -o "${outfile}" -w '{"_http_status":%{http_code}}\n' \
       > "${OUT_DIR}/${label}.status" 2>"${OUT_DIR}/${label}.err" || true
   else
-    curl -sS -m 60 "${url}" \
+    curl -sS -m 60 "${url}" ${auth_args[@]+"${auth_args[@]}"} \
       -o "${outfile}" -w '{"_http_status":%{http_code}}\n' \
       > "${OUT_DIR}/${label}.status" 2>"${OUT_DIR}/${label}.err" || true
   fi
@@ -95,7 +107,8 @@ done
 {
   echo "# 環境変数の設定有無のみ（値は記録しない）"
   for var in GROWI_BASE_URL GROWI_API_TOKEN DOCSTORE_URL \
-             DIFY_API_BASE_URL DIFY_API_KEY DIFY_DATASET_ID; do
+             DIFY_API_BASE_URL DIFY_API_KEY DIFY_DATASET_ID \
+             ADAPTER_API_KEY SYNC_API_KEY DOCSTORE_API_KEY; do
     if [ -n "${!var:-}" ]; then
       echo "${var}=SET"
     else

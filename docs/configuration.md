@@ -10,10 +10,11 @@
 | `GROWI_BASE_URL` | ✓ | — | Wiki(GROWI) のベース URL（末尾スラッシュなし） |
 | `GROWI_API_TOKEN` | ✓ | — | Wiki の API トークン（秘密。`.env` のみ） |
 | `MANUAL_ROOT_PATH` |  | `/manuals` | 対象にするマニュアルのルートパス。空で全ページ |
+| `ADAPTER_API_KEY` | 推奨 | （空=認証なし） | 設定すると全エンドポイント（`/health` 除く）で `X-API-Key` を要求。Wiki への書込 API を無認証で公開しないため、共有ネットワークでは必ず設定する |
 | `PORT` |  | `8001` | 待ち受けポート |
 | `LOG_LEVEL` |  | `INFO` | ログレベル |
 | `LOG_DIR` |  | `logs` | ログ出力先 |
-| `DEBUG_ENDPOINTS_ENABLED` |  | `true` | `/debug/raw/*`（生レスポンス取得）の有効化。本番常用は `false` 可 |
+| `DEBUG_ENDPOINTS_ENABLED` |  | `false` | `/debug/raw/*`（生レスポンス取得）の有効化。診断時のみ `true` |
 | `REQUEST_TIMEOUT` |  | `30` | Wiki API のタイムアウト秒 |
 
 > 別の Wiki を使う場合は、その Wiki 用 Adapter の `.env`（接続情報のキー名は
@@ -24,6 +25,9 @@
 | 変数 | 必須 | 既定 | 説明 |
 |------|------|------|------|
 | `DOCSTORE_URL` | ✓ | `http://localhost:8001` | DocStore Adapter の到達 URL |
+| `DOCSTORE_API_KEY` |  | （空） | Adapter の `ADAPTER_API_KEY` と同じ値（`X-API-Key` として送る） |
+| `SYNC_API_KEY` | 推奨 | （空=認証なし） | 設定すると全エンドポイント（`/health` 除く）で `X-API-Key` を要求 |
+| `SYNC_EXCLUDE_STATUSES` |  | `draft,deprecated` | 同期対象外とする `metadata.status`。下書き・退役ページを検索に出さない（HITL） |
 | `DIFY_API_BASE_URL` | ✓ | `http://localhost:5001` | Dify の URL（`/v1` は付けない） |
 | `DIFY_API_KEY` | ✓ | — | Dify データセット API キー（秘密） |
 | `DIFY_DATASET_ID` | ✓ | — | 同期先ナレッジの Dataset ID |
@@ -32,7 +36,7 @@
 | `PORT` |  | `8002` | 待ち受けポート |
 | `LOG_LEVEL` |  | `INFO` | ログレベル |
 | `LOG_DIR` |  | `logs` | ログ出力先 |
-| `DEBUG_ENDPOINTS_ENABLED` |  | `true` | `/debug/raw/*` の有効化 |
+| `DEBUG_ENDPOINTS_ENABLED` |  | `false` | `/debug/raw/*` の有効化。診断時のみ `true` |
 | `REQUEST_TIMEOUT` |  | `60` | 外部 API のタイムアウト秒 |
 
 ## Dify 側の設定（コードではなく Dify 管理画面 / API）
@@ -50,7 +54,7 @@
 |-----|--------|----------|
 | 質問/登録 共通 | LLM | あなたの LLM モデルを選択 |
 | 質問 | Knowledge Retrieval | `dataset_ids` をあなたのナレッジに。Reranker 無しなら検索を weighted_score に |
-| 登録 | environment_variables | `DOCSTORE_URL` を Adapter の到達 URL に |
+| 登録/一括取り込み/重複排除 | environment_variables | `DOCSTORE_URL` を Adapter の到達 URL に。Adapter の認証を有効にした場合は `DOCSTORE_API_KEY` にも同じ値を設定 |
 
 ## 秘密情報の扱い
 

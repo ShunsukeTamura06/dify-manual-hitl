@@ -20,6 +20,10 @@ class Settings(BaseSettings):
 
     # DocStore Adapter（同期元）
     docstore_url: str = Field(default="http://localhost:8001")
+    docstore_api_key: str = Field(
+        default="",
+        description="DocStore Adapter に送る X-API-Key（Adapter 側で認証を有効にした場合）",
+    )
 
     # Dify Knowledge API（同期先）
     dify_api_base_url: str = Field(default="http://localhost:5001")
@@ -42,10 +46,15 @@ class Settings(BaseSettings):
         )
 
     # サービス自身
+    sync_api_key: str = Field(
+        default="",
+        description="設定すると全エンドポイント（/health 除く）で X-API-Key ヘッダを要求。"
+        "空なら認証なし（ローカル開発用）",
+    )
     port: int = Field(default=8002)
     log_level: str = Field(default="INFO")
     log_dir: str = Field(default="logs")
-    debug_endpoints_enabled: bool = Field(default=True)
+    debug_endpoints_enabled: bool = Field(default=False)
     request_timeout: float = Field(default=60.0)
 
     @property

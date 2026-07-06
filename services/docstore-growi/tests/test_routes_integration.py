@@ -325,14 +325,55 @@ def test_get_page_404_propagates(client: TestClient) -> None:
 
 
 @respx.mock
-def test_debug_raw_pages_returns_unmapped(client: TestClient) -> None:
-    """debug エンドポイントは GROWI 生レスポンスをそのまま返す。"""
+def test_debug_raw_pages_returns_unmapped(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """debug エンドポイントは GROWI 生レスポンスをそのまま返す（既定は無効）。"""
+    monkeypatch.setenv("DEBUG_ENDPOINTS_ENABLED", "true")
+    get_settings.cache_clear()
+    from app.main import create_app
+
+    debug_client = TestClient(create_app())
     raw = _growi_list_response()
     respx.get(f"{GROWI_BASE}/_api/v3/pages/list").mock(
         return_value=httpx.Response(200, json=raw)
     )
-    resp = client.get("/debug/raw/pages")
+    resp = debug_client.get("/debug/raw/pages")
     assert resp.status_code == 200
     # 変換されず、GROWI の生キー (_id, revision) が見える
     assert resp.json()["pages"][0]["_id"] == "65a1b2c3d4e5f60001"
     assert "revision" in resp.json()["pages"][0]
+
+
+def test_debug_endpoints_disabled_by_default(client: TestClient) -> None:
+    """debug エンドポイントは既定で無効（404）。診断時のみ env で有効化する。"""
+    resp = client.get("/debug/raw/pages")
+    assert resp.status_code == 404
+
+
+@respx.mock
+def test_api_key_required_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ADAPTER_API_KEY 設定時は X-API-Key を要求する（/health は免除）。"""
+    monkeypatch.setenv("ADAPTER_API_KEY", "secret-key")
+    get_settings.cache_clear()
+    from app.main import create_app
+
+    auth_client = TestClient(create_app())
+    respx.get(f"{GROWI_BASE}/_api/v3/pages/list").mock(
+        return_value=httpx.Response(200, json=_growi_list_response())
+    )
+    respx.get(f"{GROWI_BASE}/_api/v3/healthcheck").mock(
+        return_value=httpx.Response(200, json={"status": "ok"})
+    )
+
+    assert auth_client.get("/pages").status_code == 401
+    assert auth_client.get("/pages", headers={"X-API-Key": "wrong"}).status_code == 401
+    assert auth_client.get("/pages", headers={"X-API-Key": "secret-key"}).status_code == 200
+    # 死活監視はキーなしで通る
+    assert auth_client.get("/health").status_code == 200
+
+
+def test_no_auth_when_key_unset(client: TestClient) -> None:
+    """キー未設定（ローカル開発）は従来通り認証なし。"""
+    resp = client.post("/pages/get-content", json={"page_id": ""})
+    assert resp.status_code == 200

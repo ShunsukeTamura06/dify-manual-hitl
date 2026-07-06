@@ -28,6 +28,14 @@ version: 0.4.0
 workflow:
   conversation_variables: []
   environment_variables:
+  - description: 'DocStore Adapter の API キー（ADAPTER_API_KEY を設定した場合のみ。空なら認証なし）'
+    id: b3f7e29f-9c0b-42e7-b8ec-db3967ea28cd
+    name: DOCSTORE_API_KEY
+    selector:
+    - env
+    - DOCSTORE_API_KEY
+    value: ''
+    value_type: string
   - description: ''
     id: 1174e719-482b-4749-aead-1056eb332db0
     name: DOCSTORE_URL
@@ -528,7 +536,7 @@ workflow:
         body:
           data: '{"page_id": "{{#route_parse.target_page_id#}}"}'
           type: raw-text
-        headers: Content-Type:application/json
+        headers: "Content-Type:application/json\nX-API-Key:{{#env.DOCSTORE_API_KEY#}}"
         method: post
         params: ''
         timeout:
@@ -657,7 +665,7 @@ workflow:
         body:
           data: '{{#build_upsert.body#}}'
           type: raw-text
-        headers: Content-Type:application/json
+        headers: "Content-Type:application/json\nX-API-Key:{{#env.DOCSTORE_API_KEY#}}"
         method: post
         params: ''
         timeout:

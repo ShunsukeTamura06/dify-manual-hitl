@@ -149,6 +149,40 @@ def test_sync_diff_requires_since(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
+def test_api_key_required_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SYNC_API_KEY 設定時は X-API-Key を要求する（同期トリガーの保護）。"""
+    monkeypatch.setenv("SYNC_API_KEY", "sync-secret")
+    get_settings.cache_clear()
+    from app.main import create_app
+
+    auth_client = TestClient(create_app())
+    resp = auth_client.post("/sync", json={"mode": "diff"})
+    assert resp.status_code == 401
+    # 正しいキーなら通る（mode バリデーションの 400 に到達する）
+    resp = auth_client.post(
+        "/sync", json={"mode": "diff"}, headers={"X-API-Key": "sync-secret"}
+    )
+    assert resp.status_code == 400
+
+
+@respx.mock
+def test_docstore_client_sends_api_key(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DOCSTORE_API_KEY 設定時、Adapter へのリクエストに X-API-Key が付く。"""
+    monkeypatch.setenv("DOCSTORE_API_KEY", "adapter-secret")
+    get_settings.cache_clear()
+    from app.main import create_app
+
+    keyed_client = TestClient(create_app())
+    info_route = respx.get(f"{DOCSTORE}/info").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    respx.get(_dify_docs_url()).mock(
+        return_value=httpx.Response(200, json={"data": [], "has_more": False})
+    )
+    keyed_client.get("/health")
+    assert info_route.calls[0].request.headers.get("X-API-Key") == "adapter-secret"
+
+
 @respx.mock
 def test_health_both_reachable(client: TestClient) -> None:
     respx.get(f"{DOCSTORE}/info").mock(return_value=httpx.Response(200, json={}))

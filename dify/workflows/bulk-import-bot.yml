@@ -28,6 +28,14 @@ version: 0.4.0
 workflow:
   conversation_variables: []
   environment_variables:
+  - description: 'DocStore Adapter の API キー（ADAPTER_API_KEY を設定した場合のみ。空なら認証なし）'
+    id: 7ee868a1-b813-4291-836d-50974a3bbcf0
+    name: DOCSTORE_API_KEY
+    selector:
+    - env
+    - DOCSTORE_API_KEY
+    value: ''
+    value_type: string
   - description: ''
     id: 1174e719-482b-4749-aead-1056eb332db0
     name: DOCSTORE_URL
@@ -809,7 +817,7 @@ workflow:
           data: '{{#fmt_build.body#}}'
           type: raw-text
         desc: ''
-        headers: Content-Type:application/json
+        headers: "Content-Type:application/json\nX-API-Key:{{#env.DOCSTORE_API_KEY#}}"
         isInIteration: true
         isInLoop: false
         iteration_id: iter_reduce

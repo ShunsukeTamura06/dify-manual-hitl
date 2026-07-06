@@ -19,7 +19,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 
 from .dify_client import DifyError, DifyKnowledgeClient
 from .docstore_client import DocStoreClient, DocStoreError
@@ -28,10 +29,17 @@ from .models import HealthStatus, SyncRequest, SyncResult
 from .settings import get_settings
 from .sync_engine import SyncEngine
 
+# 認証を免除するパス（死活監視はキーなしで叩けるようにする）
+_AUTH_EXEMPT_PATHS = frozenset({"/health"})
+
 
 def _make_docstore() -> DocStoreClient:
     s = get_settings()
-    return DocStoreClient(base_url=s.docstore_url, timeout=s.request_timeout)
+    return DocStoreClient(
+        base_url=s.docstore_url,
+        timeout=s.request_timeout,
+        api_key=s.docstore_api_key,
+    )
 
 
 def _make_dify() -> DifyKnowledgeClient:
@@ -65,6 +73,24 @@ def create_app() -> FastAPI:
         description="Wiki（DocStore）を Dify Knowledge に同期する。Wiki 非依存。",
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def require_api_key(request: Request, call_next) -> Response:
+        """SYNC_API_KEY が設定されている場合、X-API-Key ヘッダを検証する。
+
+        同期トリガー（Dify Knowledge の書換）を無認証で公開しないため。
+        """
+        key = settings.sync_api_key
+        if (
+            key
+            and request.url.path not in _AUTH_EXEMPT_PATHS
+            and request.headers.get("x-api-key") != key
+        ):
+            return JSONResponse(
+                status_code=401,
+                content={"error_code": "unauthorized", "message": "X-API-Key が必要です"},
+            )
+        return await call_next(request)
 
     @app.post("/sync", response_model=SyncResult)
     async def sync(req: SyncRequest) -> SyncResult:

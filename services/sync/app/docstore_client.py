@@ -20,9 +20,10 @@ class DocStoreError(Exception):
 class DocStoreClient:
     """DocStore Adapter の HTTP クライアント。"""
 
-    def __init__(self, base_url: str, timeout: float = 60.0) -> None:
+    def __init__(self, base_url: str, timeout: float = 60.0, api_key: str = "") -> None:
         self._base_url = base_url.rstrip("/")
-        self._client = httpx.AsyncClient(timeout=timeout)
+        headers = {"X-API-Key": api_key} if api_key else {}
+        self._client = httpx.AsyncClient(timeout=timeout, headers=headers)
 
     async def close(self) -> None:
         await self._client.aclose()

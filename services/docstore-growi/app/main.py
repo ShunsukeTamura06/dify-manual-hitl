@@ -13,11 +13,15 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 
 from .logging_setup import configure_logging
 from .routes import changes, debug, meta, pages
 from .settings import get_settings
+
+# 認証を免除するパス（死活監視はキーなしで叩けるようにする）
+_AUTH_EXEMPT_PATHS = frozenset({"/health"})
 
 
 def create_app() -> FastAPI:
@@ -42,6 +46,25 @@ def create_app() -> FastAPI:
         description="GROWI を DocStore API として公開する Adapter",
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def require_api_key(request: Request, call_next) -> Response:
+        """ADAPTER_API_KEY が設定されている場合、X-API-Key ヘッダを検証する。
+
+        Wiki への書込・削除ができる API なので、社内ネットワークでも
+        無認証で公開しない（キー未設定はローカル開発用の明示的な選択）。
+        """
+        key = settings.adapter_api_key
+        if (
+            key
+            and request.url.path not in _AUTH_EXEMPT_PATHS
+            and request.headers.get("x-api-key") != key
+        ):
+            return JSONResponse(
+                status_code=401,
+                content={"error_code": "unauthorized", "message": "X-API-Key が必要です"},
+            )
+        return await call_next(request)
 
     app.include_router(meta.router)
     app.include_router(pages.router)
