@@ -4,7 +4,7 @@
 # **直接編集せず、元 DSL とスクリプトを直して再生成する。**
 #
 # インポート後に環境へ合わせる箇所:
-#  - LLM ノードのモデル（qa 分岐は anthropic のプレースホルダ。任意の LLM に）
+#  - LLM ノードのモデル（既定は登録フローと同一。任意の LLM に差し替え可）
 #  - q_knowledge_retrieval / similar_search の dataset_ids と Reranker 設定
 #  - environment_variables の DOCSTORE_URL / DOCSTORE_API_KEY
 app:
@@ -354,10 +354,16 @@ workflow:
       target: llm1
       targetHandle: target
       type: custom
-    - id: route_ifelse-false-b_split_windows
+    - id: route_ifelse-case_bulk-b_split_windows
+      source: route_ifelse
+      sourceHandle: case_bulk
+      target: b_split_windows
+      targetHandle: target
+      type: custom
+    - id: route_ifelse-false-route_fallback_answer
       source: route_ifelse
       sourceHandle: 'false'
-      target: b_split_windows
+      target: route_fallback_answer
       targetHandle: target
       type: custom
     nodes:
@@ -852,12 +858,12 @@ workflow:
         type: llm
         title: 回答生成 (Claude)
         model:
-          provider: anthropic
-          name: claude-sonnet-4-5-20250929
+          provider: langgenius/openai/openai
+          name: gpt-4o-mini
           mode: chat
           completion_params:
-            temperature: 0.1
-            max_tokens: 2000
+            max_tokens: 4000
+            temperature: 0.2
         prompt_template:
         - role: system
           text: 'あなたは社内マニュアルに基づいて質問に答えるアシスタントです。
@@ -1538,8 +1544,12 @@ workflow:
           1. 添付なし → qa（書込材料が無い以上、書込フローはあり得ない）\n2. 添付あり + メッセージに「分割」or「一括」 → bulk（明示指示が最優先）\n\
           3. 添付あり + メッセージに「更新」 → register（既存ページへのマージ経路）\n4. 添付あり + 抽出テキスト > BULK_THRESHOLD_CHARS\
           \ → bulk（1 回の LLM 出力に\n   収まらない量は分割しないと内容が欠落する）\n5. 添付あり（上記以外） → register\n\
-          \nこのファイルは標準ライブラリのみで完結しており、`main` をそのまま Dify の\nCode ノードに貼り付けられる。\n\"\"\"\
-          \n\n# bulk（分割取り込み）に切り替える抽出テキスト長の閾値。\n# 一括取り込みスプリッターのウィンドウ上限（splitter DEFAULT_MAX_CHARS）と同値:\n\
+          \n優先順位の根拠（曖昧な指示の倒し方）:\n- 規則 2 > 3（「分割して更新して」は bulk）: 誤って bulk に倒れても新規 draft\
+          \ が\n  増えるだけで人が捨てられる。誤って register(更新) に倒れると**既存ページ本文を\n  書き換える**（GROWI 履歴で戻せるが影響が大きい）。迷ったら影響の小さい方に倒す。\n\
+          - 規則 3 > 4（大きい更新素材も register）: bulk は既存ページを更新できない\n  （新規作成のみ）ため、「更新」の明示指示を尊重する。巨大な更新素材はマージ\
+          \ LLM の\n  出力上限で欠落し得るのは既知の制約（v2 課題。docs/unified-chat-design.md 参照）。\n\n\
+          このファイルは標準ライブラリのみで完結しており、`main` をそのまま Dify の\nCode ノードに貼り付けられる。\n\"\"\"\n\
+          \n# bulk（分割取り込み）に切り替える抽出テキスト長の閾値。\n# 一括取り込みスプリッターのウィンドウ上限（splitter DEFAULT_MAX_CHARS）と同値:\n\
           # 「1 回の LLM 出力に無理なく収まる量」を超えたら 1 ページ登録では欠落する。\nBULK_THRESHOLD_CHARS = 7000\n\
           \n# 明示指示のキーワード（決定的な部分一致。正規表現・LLM は使わない）\n_BULK_KEYWORDS = (\"分割\", \"一括\"\
           )\n_REGISTER_KEYWORDS = (\"更新\",)\n\nROUTE_QA = \"qa\"\nROUTE_REGISTER =\
@@ -1606,8 +1616,34 @@ workflow:
             variable_selector:
             - router
             - route
+        - case_id: case_bulk
+          logical_operator: and
+          conditions:
+          - id: cond_bulk
+            comparison_operator: is
+            value: bulk
+            varType: string
+            variable_selector:
+            - router
+            - route
       id: route_ifelse
       position:
         x: 900
         y: 282
+      type: custom
+    - data:
+        type: answer
+        title: 判定不能時の案内
+        desc: ルーター出力が想定外のときの安全側フォールバック（書き込まない）
+        answer: 'ご依頼を判定できませんでした（route={{#router.route#}}）。
+
+          ・質問の場合: そのままメッセージでお送りください
+
+          ・登録の場合: ファイルを添付してください
+
+          '
+      id: route_fallback_answer
+      position:
+        x: 1160
+        y: 120
       type: custom

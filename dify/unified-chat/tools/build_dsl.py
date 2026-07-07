@@ -178,14 +178,50 @@ def build() -> dict:
                         }
                     ],
                 },
+                # bulk も明示 case にする。ELSE（既定）を書込系フローに向けない:
+                # ルーター出力が想定外（空・将来の値追加）でも書込が誤発火しない。
+                {
+                    "case_id": "case_bulk",
+                    "logical_operator": "and",
+                    "conditions": [
+                        {
+                            "id": "cond_bulk",
+                            "comparison_operator": "is",
+                            "value": "bulk",
+                            "varType": "string",
+                            "variable_selector": ["router", "route"],
+                        }
+                    ],
+                },
             ],
         },
         "id": "route_ifelse",
         "position": {"x": 900, "y": 282},
         "type": "custom",
     }
+    fallback_node = {
+        "data": {
+            "type": "answer",
+            "title": "判定不能時の案内",
+            "desc": "ルーター出力が想定外のときの安全側フォールバック（書き込まない）",
+            "answer": (
+                "ご依頼を判定できませんでした（route={{#router.route#}}）。\n"
+                "・質問の場合: そのままメッセージでお送りください\n"
+                "・登録の場合: ファイルを添付してください\n"
+            ),
+        },
+        "id": "route_fallback_answer",
+        "position": {"x": 1160, "y": 120},
+        "type": "custom",
+    }
 
-    nodes = reg_nodes + qa_nodes + bulk_nodes + [router_node, ifelse_node]
+    # qa 分岐の LLM は登録フローと同じモデルに揃える（dependencies と整合させるため。
+    # インポート後に任意の LLM へ差し替え可能な点は変わらない）
+    reg_llm_model = next(n for n in reg_nodes if n["id"] == "llm1")["data"]["model"]
+    q_llm = next(n for n in qa_nodes if n["id"] == "q_llm")
+    q_llm["data"]["model"] = {**q_llm["data"]["model"], **copy.deepcopy(reg_llm_model)}
+
+    nodes = reg_nodes + qa_nodes + bulk_nodes + [router_node, ifelse_node, fallback_node]
     edges = (
         reg_edges
         + qa_edges
@@ -195,7 +231,8 @@ def build() -> dict:
             _edge("router", "route_ifelse"),
             _edge("route_ifelse", "q_knowledge_retrieval", handle="case_qa"),
             _edge("route_ifelse", "llm1", handle="case_register"),
-            _edge("route_ifelse", "b_split_windows", handle="false"),
+            _edge("route_ifelse", "b_split_windows", handle="case_bulk"),
+            _edge("route_ifelse", "route_fallback_answer", handle="false"),
         ]
     )
     # エッジ ID の重複を避ける（各 Bot 由来の e1 等が衝突しうる）
@@ -291,7 +328,7 @@ def main() -> None:
         "# **直接編集せず、元 DSL とスクリプトを直して再生成する。**\n"
         "#\n"
         "# インポート後に環境へ合わせる箇所:\n"
-        "#  - LLM ノードのモデル（qa 分岐は anthropic のプレースホルダ。任意の LLM に）\n"
+        "#  - LLM ノードのモデル（既定は登録フローと同一。任意の LLM に差し替え可）\n"
         "#  - q_knowledge_retrieval / similar_search の dataset_ids と Reranker 設定\n"
         "#  - environment_variables の DOCSTORE_URL / DOCSTORE_API_KEY\n"
     )
