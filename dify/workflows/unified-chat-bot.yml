@@ -1,0 +1,1613 @@
+# マニュアルアシスタント（統一チャット v1）— tools/build_dsl.py が生成
+# 質問(qa) / 登録(register) / 一括取り込み(bulk) を決定的ルーティングで 1 入口に統合。
+# 設計: docs/unified-chat-design.md。
+# **直接編集せず、元 DSL とスクリプトを直して再生成する。**
+#
+# インポート後に環境へ合わせる箇所:
+#  - LLM ノードのモデル（qa 分岐は anthropic のプレースホルダ。任意の LLM に）
+#  - q_knowledge_retrieval / similar_search の dataset_ids と Reranker 設定
+#  - environment_variables の DOCSTORE_URL / DOCSTORE_API_KEY
+app:
+  description: マニュアル統一チャット v1。質問・登録・一括取り込みを 1 つの入口で受け、決定的ルーティングで振り分ける。
+  icon: 💬
+  icon_background: '#D5F5F6'
+  mode: advanced-chat
+  name: マニュアルアシスタント
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/openai:0.4.2@21195ee1321849e0a7d4b3f6b2fd8c2be23ea6c7182e1b444ecc4c1711b52468
+    version: null
+kind: app
+version: 0.4.0
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - description: DocStore Adapter の API キー（ADAPTER_API_KEY を設定した場合のみ。空なら認証なし）
+    id: b3f7e29f-9c0b-42e7-b8ec-db3967ea28cd
+    name: DOCSTORE_API_KEY
+    selector:
+    - env
+    - DOCSTORE_API_KEY
+    value: ''
+    value_type: string
+  - description: ''
+    id: 1174e719-482b-4749-aead-1056eb332db0
+    name: DOCSTORE_URL
+    selector:
+    - env
+    - DOCSTORE_URL
+    value: http://docstore-growi:8001
+    value_type: string
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - document
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: true
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 1
+    opening_statement: 'マニュアルのことは何でもここへどうぞ。
+
+      ・質問: そのまま聞いてください（出典付きで回答します）
+
+      ・登録/更新: ファイルを添付してください（大きい文書は自動で分割します）
+
+      登録されたページは下書きになり、GROWI で公開すると検索に反映されます。
+
+      '
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        sourceType: start
+        targetType: document-extractor
+      id: start-source-doc_extractor
+      source: start
+      sourceHandle: source
+      target: doc_extractor
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: llm
+        targetType: parameter-extractor
+      id: llm1-source-param_extractor
+      source: llm1
+      sourceHandle: source
+      target: param_extractor
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: parameter-extractor
+        targetType: knowledge-retrieval
+      id: param_extractor-source-similar_search
+      source: param_extractor
+      sourceHandle: source
+      target: similar_search
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: knowledge-retrieval
+        targetType: code
+      id: similar_search-source-sim_format
+      source: similar_search
+      sourceHandle: source
+      target: sim_format
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: code
+        targetType: llm
+      id: sim_format-source-route_llm
+      source: sim_format
+      sourceHandle: source
+      target: route_llm
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: llm
+        targetType: code
+      id: route_llm-source-route_parse
+      source: route_llm
+      sourceHandle: source
+      target: route_parse
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: code
+        targetType: http-request
+      id: route_parse-source-http_getcontent
+      source: route_parse
+      sourceHandle: source
+      target: http_getcontent
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: http-request
+        targetType: llm
+      id: http_getcontent-source-merge_llm
+      source: http_getcontent
+      sourceHandle: source
+      target: merge_llm
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: llm
+        targetType: code
+      id: merge_llm-source-build_upsert
+      source: merge_llm
+      sourceHandle: source
+      target: build_upsert
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: code
+        targetType: http-request
+      id: build_upsert-source-http_upsert
+      source: build_upsert
+      sourceHandle: source
+      target: http_upsert
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: http-request
+        targetType: answer
+      id: http_upsert-source-answer
+      source: http_upsert
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+    - id: q_knowledge_retrieval-source-q_llm
+      source: q_knowledge_retrieval
+      target: q_llm
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+    - id: q_llm-source-q_answer
+      source: q_llm
+      target: q_answer
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: iteration
+      id: b_split_windows-source-b_iter_map
+      source: b_split_windows
+      sourceHandle: source
+      target: b_iter_map
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: b_iter_map
+        sourceType: iteration-start
+        targetType: llm
+      id: b_iter_mapstart-source-b_window_llm
+      source: b_iter_mapstart
+      sourceHandle: source
+      target: b_window_llm
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: iteration
+        targetType: code
+      id: b_iter_map-source-b_merge_pages
+      source: b_iter_map
+      sourceHandle: source
+      target: b_merge_pages
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: iteration
+      id: b_merge_pages-source-b_iter_reduce
+      source: b_merge_pages
+      sourceHandle: source
+      target: b_iter_reduce
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: b_iter_reduce
+        sourceType: iteration-start
+        targetType: code
+      id: b_iter_reducestart-source-b_unpack
+      source: b_iter_reducestart
+      sourceHandle: source
+      target: b_unpack
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: b_iter_reduce
+        sourceType: code
+        targetType: llm
+      id: b_unpack-source-b_fmt_llm
+      source: b_unpack
+      sourceHandle: source
+      target: b_fmt_llm
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: b_iter_reduce
+        sourceType: llm
+        targetType: code
+      id: b_fmt_llm-source-b_fmt_build
+      source: b_fmt_llm
+      sourceHandle: source
+      target: b_fmt_build
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: b_iter_reduce
+        sourceType: code
+        targetType: http-request
+      id: b_fmt_build-source-b_http_upsert
+      source: b_fmt_build
+      sourceHandle: source
+      target: b_http_upsert
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: iteration
+        targetType: code
+      id: b_iter_reduce-source-b_summarize
+      source: b_iter_reduce
+      sourceHandle: source
+      target: b_summarize
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: b_summarize-source-b_answer
+      source: b_summarize
+      sourceHandle: source
+      target: b_answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - id: doc_extractor-source-router
+      source: doc_extractor
+      sourceHandle: source
+      target: router
+      targetHandle: target
+      type: custom
+    - id: router-source-route_ifelse
+      source: router
+      sourceHandle: source
+      target: route_ifelse
+      targetHandle: target
+      type: custom
+    - id: route_ifelse-case_qa-q_knowledge_retrieval
+      source: route_ifelse
+      sourceHandle: case_qa
+      target: q_knowledge_retrieval
+      targetHandle: target
+      type: custom
+    - id: route_ifelse-case_register-llm1
+      source: route_ifelse
+      sourceHandle: case_register
+      target: llm1
+      targetHandle: target
+      type: custom
+    - id: route_ifelse-false-b_split_windows
+      source: route_ifelse
+      sourceHandle: 'false'
+      target: b_split_windows
+      targetHandle: target
+      type: custom
+    nodes:
+    - data:
+        title: 開始
+        type: start
+        variables: []
+      height: 52
+      id: start
+      position:
+        x: 80
+        y: 282
+      positionAbsolute:
+        x: 80
+        y: 282
+      type: custom
+      width: 242
+    - data:
+        is_array_file: true
+        title: ファイル抽出
+        type: document-extractor
+        variable_selector:
+        - sys
+        - files
+      height: 92
+      id: doc_extractor
+      position:
+        x: 360
+        y: 282
+      positionAbsolute:
+        x: 360
+        y: 282
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            max_tokens: 4000
+            temperature: 0.2
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: 'あなたは社内マニュアルを整備する編集者です。
+
+            アップロードされた素材を、社内標準テンプレートに沿った Markdown に整形してください。
+
+
+            # 出力は必ず frontmatter + 本文。frontmatter は以下:
+
+            ---
+
+            title: 動詞+目的語のタイトル（reference/explanation は名詞可）
+
+            path: 下の「path の決め方」に従う
+
+            type: tutorial | howto | reference | explanation
+
+            audience: 対象者（不明なら 全社）
+
+            owner:
+
+            review_due:
+
+            status: draft
+
+            canonical: false
+
+            ---
+
+
+            # path の決め方（重要・厳守）
+
+            - 形式: /manuals/<部署>/<業務カテゴリ>/_<type>/<タスク名>
+
+            - 各セグメントは必ず日本語のまま書く。英語・ローマ字・slug に変換してはいけない。
+
+            - スペースは入れない（区切りも日本語の語をそのまま繋ぐ）。
+
+            - 例: /manuals/総務/出張/_howto/出張を申請する
+
+            - 部署・カテゴリが不明なら「未分類」を使う。例 /manuals/未分類/_howto/出張を申請する
+
+
+            # 本文
+
+            ## 概要（1-3文）/ ## 対象者 / ## 前提条件 / ## 手順 / ## トラブルシューティング / ## よくある質問 / ##
+            改訂履歴
+
+            - 見出し直下に1-2文の要約。表は残し直前に要約平文を付ける。連番厳守。略語は定義。
+
+            - 素材に無い情報は創作しない。owner/review_due は不明なら空欄。
+
+
+            # 出力形式（厳守）
+
+            - frontmatter を含む Markdown 本文そのものだけを出力する。
+
+            - 全体を ``` や ```markdown のコードフェンスで囲まない。
+
+            - 前置き・説明文を付けない。
+
+            '
+        - role: user
+          text: '# 元のマニュアル素材
+
+            {{#doc_extractor.text#}}
+
+
+            # ユーザーからの補足
+
+            {{#sys.query#}}
+
+            '
+        title: 整形 (LLM-1)
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: llm1
+      position:
+        x: 640
+        y: 282
+      positionAbsolute:
+        x: 640
+        y: 282
+      type: custom
+      width: 242
+    - data:
+        instruction: '与えられた Markdown の frontmatter から path, title, type を抽出してください。
+
+          値が無い場合は空文字にしてください。
+
+          '
+        model:
+          completion_params:
+            temperature: 0
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        parameters:
+        - description: frontmatter の path（GROWI 配置パス）
+          name: path
+          required: true
+          type: string
+        - description: frontmatter の title
+          name: title
+          required: true
+          type: string
+        - description: frontmatter の type
+          name: type
+          required: false
+          type: string
+        query:
+        - llm1
+        - text
+        reasoning_mode: prompt
+        title: 項目抽出
+        type: parameter-extractor
+      height: 88
+      id: param_extractor
+      position:
+        x: 920
+        y: 282
+      positionAbsolute:
+        x: 920
+        y: 282
+      type: custom
+      width: 242
+    - data:
+        answer: '処理が完了しました。新規の場合は下書き（draft）です。GROWI で内容を確認し、公開（status: published）してください。既存ページの更新の場合は
+          status は変わっていません。
+
+
+          ## 類似ページ（重複の可能性・参考）
+
+          {{#sim_format.text#}}
+
+
+          ---
+
+          結果: {{#http_upsert.body#}}'
+        title: 完了通知
+        type: answer
+      height: 183
+      id: answer
+      position:
+        x: 1760
+        y: 282
+      positionAbsolute:
+        x: 1760
+        y: 282
+      type: custom
+      width: 242
+    - data:
+        dataset_ids:
+        - S0nYaYbe1DHkjfH5U6D5w4pA61DRnyluxbefZo6ujFnrilynfgF6N7Zp6B2MQzmp
+        multiple_retrieval_config:
+          reranking_enable: false
+          reranking_mode: weighted_score
+          score_threshold: 0.4
+          score_threshold_enabled: true
+          top_k: 3
+          weights:
+            keyword_setting:
+              keyword_weight: 0
+            vector_setting:
+              embedding_model_name: ''
+              embedding_provider_name: ''
+              vector_weight: 1
+            weight_type: customized
+        query_variable_selector:
+        - param_extractor
+        - title
+        retrieval_mode: multiple
+        title: 類似ページ検索
+        type: knowledge-retrieval
+      id: similar_search
+      position:
+        x: 1060
+        y: 460
+      positionAbsolute:
+        x: 1060
+        y: 460
+      type: custom
+    - data:
+        code: "\ndef main(items: list) -> dict:\n    seen = {}\n    for r in (items\
+          \ or []):\n        meta = r.get(\"metadata\", {}) or {}\n        name =\
+          \ meta.get(\"document_name\", \"\") or r.get(\"title\", \"\")\n        title\
+          \ = name.split(\"::\", 1)[1] if \"::\" in name else name\n        score\
+          \ = meta.get(\"score\") or 0\n        if title and title not in seen:\n\
+          \            seen[title] = score\n    if not seen:\n        return {\"text\"\
+          : \"（内容が近い既存ページは見つかりませんでした）\"}\n    lines = []\n    for t, s in sorted(seen.items(),\
+          \ key=lambda x: -x[1]):\n        lines.append(f\"- {t}（類似度 {round(s*100)}%）\"\
+          )\n    return {\"text\": \"\\n\".join(lines)}\n"
+        code_language: python3
+        outputs:
+          text:
+            type: string
+        title: 類似ページ整形
+        type: code
+        variables:
+        - value_selector:
+          - similar_search
+          - result
+          variable: items
+      id: sim_format
+      position:
+        x: 1330
+        y: 460
+      positionAbsolute:
+        x: 1330
+        y: 460
+      type: custom
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            max_tokens: 4000
+            temperature: 0
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: 'ユーザーのメッセージと『類似既存ページ一覧』から、これは新規作成か既存ページの更新かを判定する。
+
+            ユーザーが既存ページの更新を意図している場合のみ action=update とし、そのページのタイトルを target_title に入れる。
+
+            明示が無ければ action=new。
+
+            出力は JSON のみ: {"action":"new|update","target_title":"..."}。前後に文を付けない。'
+        - role: user
+          text: 'メッセージ:
+
+            {{#sys.query#}}
+
+
+            類似既存ページ（document_name は ''ID::タイトル'' 形式）:
+
+            {{#similar_search.result#}}'
+        title: 更新対象の判定
+        type: llm
+        vision:
+          enabled: false
+      id: route_llm
+      position:
+        x: 1600
+        y: 460
+      type: custom
+    - data:
+        code: "\nimport json\ndef main(route_json: str, items: list) -> dict:\n  \
+          \  s = (route_json or \"\").strip()\n    if s.startswith(\"```\"):\n   \
+          \     s = s.split(\"```\")[1].replace(\"json\", \"\", 1).strip()\n    try:\n\
+          \        r = json.loads(s)\n    except Exception:\n        r = {}\n    action\
+          \ = (r.get(\"action\") or \"new\").strip()\n    target_title = (r.get(\"\
+          target_title\") or \"\").strip()\n    pid = \"\"\n    if action == \"update\"\
+          \ and target_title:\n        for it in (items or []):\n            meta\
+          \ = it.get(\"metadata\", {}) or {}\n            name = meta.get(\"document_name\"\
+          , \"\")\n            if \"::\" in name:\n                p, t = name.split(\"\
+          ::\", 1)\n                if t.strip() == target_title or target_title in\
+          \ t:\n                    pid = p\n                    break\n    return\
+          \ {\"target_page_id\": pid}\n"
+        code_language: python3
+        outputs:
+          target_page_id:
+            type: string
+        title: 対象ID解決
+        type: code
+        variables:
+        - value_selector:
+          - route_llm
+          - text
+          variable: route_json
+        - value_selector:
+          - similar_search
+          - result
+          variable: items
+      id: route_parse
+      position:
+        x: 1860
+        y: 460
+      type: custom
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{"page_id": "{{#route_parse.target_page_id#}}"}'
+          type: raw-text
+        headers: 'Content-Type:application/json
+
+          X-API-Key:{{#env.DOCSTORE_API_KEY#}}'
+        method: post
+        params: ''
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        title: 既存本文の取得
+        type: http-request
+        url: '{{#env.DOCSTORE_URL#}}/pages/get-content'
+      id: http_getcontent
+      position:
+        x: 2120
+        y: 460
+      type: custom
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            max_tokens: 4000
+            temperature: 0.2
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: '既存ページの本文（JSONの content フィールド。空なら新規）と、新しい素材から、統合した最終マニュアルを作る。
+
+            - 既存が空なら新素材をそのまま整える。
+
+            - 既存があれば、新素材の情報を既存の構造に溶け込ませる（重複は1つに、矛盾は新素材を優先しつつ注記）。
+
+            - frontmatter を含む Markdown 本文そのものだけを出力。``` で囲まない。frontmatter に status
+            は書かない（後段が自動設定する: 新規は draft、更新は既存の status を維持）。'
+        - role: user
+          text: '既存ページ(JSON):
+
+            {{#http_getcontent.body#}}
+
+
+            新しい素材(整形済み):
+
+            {{#llm1.text#}}'
+        title: 統合(マージ)
+        type: llm
+        vision:
+          enabled: false
+      id: merge_llm
+      position:
+        x: 2380
+        y: 460
+      type: custom
+    - data:
+        code: "\nimport json\n\ndef main(target_page_id: str, path: str, title: str,\
+          \ content: str, existing_json: str) -> dict:\n    try:\n        existing_status\
+          \ = str((json.loads(existing_json or \"{}\") or {}).get(\"status\", \"\"\
+          ))\n    except Exception:\n        existing_status = \"\"\n    desired =\
+          \ existing_status if (target_page_id or \"\") else \"draft\"\n\n    lines\
+          \ = content.split(\"\\n\")\n    if lines and lines[0].strip() == \"---\"\
+          :\n        # 既存 frontmatter 内の status 行を置き換える\n        try:\n          \
+          \  end = lines[1:].index(\"---\") + 1\n        except ValueError:\n    \
+          \        end = -1\n        if end > 0:\n            fm = [ln for ln in lines[1:end]\
+          \ if not ln.strip().startswith(\"status:\")]\n            if desired:\n\
+          \                fm.append(f\"status: {desired}\")\n            content\
+          \ = \"\\n\".join([\"---\"] + fm + lines[end:])\n    elif desired:\n    \
+          \    content = f\"---\\nstatus: {desired}\\n---\\n{content}\"\n\n    body\
+          \ = json.dumps({\n        \"target_page_id\": target_page_id or \"\",\n\
+          \        \"path\": path, \"title\": title,\n        \"content\": content,\
+          \ \"metadata\": {},\n    }, ensure_ascii=False)\n    return {\"body\": body}\n"
+        code_language: python3
+        outputs:
+          body:
+            type: string
+        title: upsertボディ組立
+        type: code
+        variables:
+        - value_selector:
+          - route_parse
+          - target_page_id
+          variable: target_page_id
+        - value_selector:
+          - param_extractor
+          - path
+          variable: path
+        - value_selector:
+          - param_extractor
+          - title
+          variable: title
+        - value_selector:
+          - merge_llm
+          - text
+          variable: content
+        - value_selector:
+          - http_getcontent
+          - body
+          variable: existing_json
+      id: build_upsert
+      position:
+        x: 2640
+        y: 460
+      type: custom
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{{#build_upsert.body#}}'
+          type: raw-text
+        headers: 'Content-Type:application/json
+
+          X-API-Key:{{#env.DOCSTORE_API_KEY#}}'
+        method: post
+        params: ''
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        title: GROWI作成/更新
+        type: http-request
+        url: '{{#env.DOCSTORE_URL#}}/pages/upsert'
+      id: http_upsert
+      position:
+        x: 2900
+        y: 460
+      type: custom
+    - id: q_knowledge_retrieval
+      type: custom
+      data:
+        type: knowledge-retrieval
+        title: マニュアル検索
+        query_variable_selector:
+        - sys
+        - query
+        dataset_ids:
+        - REPLACE_WITH_YOUR_DATASET_ID
+        retrieval_mode: multiple
+        multiple_retrieval_config:
+          top_k: 10
+          score_threshold: 0.3
+          score_threshold_enabled: true
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model:
+            provider: REPLACE_WITH_RERANKER_PROVIDER
+            model: REPLACE_WITH_RERANKER_MODEL
+      position:
+        x: 380
+        y: -118
+    - id: q_llm
+      type: custom
+      data:
+        type: llm
+        title: 回答生成 (Claude)
+        model:
+          provider: anthropic
+          name: claude-sonnet-4-5-20250929
+          mode: chat
+          completion_params:
+            temperature: 0.1
+            max_tokens: 2000
+        prompt_template:
+        - role: system
+          text: 'あなたは社内マニュアルに基づいて質問に答えるアシスタントです。
+
+
+            # 厳守ルール
+
+            1. 提供された「コンテキスト」の情報のみを使って回答する。コンテキストに無い情報は推測しない。
+
+            2. 該当情報が無い・不十分な場合は、明確に「該当する情報がマニュアルに見当たりません」と回答する。憶測で補わない。
+
+            3. 回答には必ず**出典**を含める。出典はマニュアル名と該当箇所を明記する。
+
+            4. 複数のコンテキストで矛盾する記述がある場合、矛盾を隠さず両方提示し、どちらが新しいか/正しいかを確認するよう促す。
+
+            5. 古い情報の可能性がある場合は、その旨を注記する。
+
+
+            # 出力形式
+
+            ## 回答
+
+            （簡潔に。長くても5-7文程度。手順なら番号付き）
+
+
+            ## 出典
+
+            - {マニュアル名}: {該当箇所の要約}
+
+            - ...
+
+
+            ## 注意・補足
+
+            （矛盾、不確実性、確認が必要な点があれば）
+
+            '
+        - role: user
+          text: '# コンテキスト
+
+            {{#context#}}
+
+
+            # 質問
+
+            {{#sys.query#}}
+
+            '
+        context:
+          enabled: true
+          variable_selector:
+          - q_knowledge_retrieval
+          - result
+        vision:
+          enabled: false
+      position:
+        x: 680
+        y: -118
+    - id: q_answer
+      type: custom
+      data:
+        type: answer
+        title: 回答
+        answer: '{{#q_llm.text#}}'
+      position:
+        x: 980
+        y: -118
+    - data:
+        code: "\nimport re\n\nDEFAULT_MAX_CHARS = 7000\n_PARAGRAPH_SEP = re.compile(r\"\
+          \\n[ \\t]*\\n\")\n\n\ndef _split_paragraphs(text):\n    return [p for p\
+          \ in _PARAGRAPH_SEP.split(text) if p.strip()]\n\n\ndef _hard_split(chunk,\
+          \ max_chars):\n    if len(chunk) <= max_chars:\n        return [chunk]\n\
+          \    pieces = []\n    buf = \"\"\n    for line in chunk.splitlines(keepends=True):\n\
+          \        while len(line) > max_chars:\n            if buf:\n           \
+          \     pieces.append(buf)\n                buf = \"\"\n            pieces.append(line[:max_chars])\n\
+          \            line = line[max_chars:]\n        if buf and len(buf) + len(line)\
+          \ > max_chars:\n            pieces.append(buf)\n            buf = \"\"\n\
+          \        buf += line\n    if buf:\n        pieces.append(buf)\n    return\
+          \ pieces\n\n\ndef split_into_windows(text, max_chars=DEFAULT_MAX_CHARS):\n\
+          \    windows = []\n    buf = \"\"\n    for para in _split_paragraphs(text):\n\
+          \        if len(para) > max_chars:\n            if buf:\n              \
+          \  windows.append(buf)\n                buf = \"\"\n            windows.extend(_hard_split(para,\
+          \ max_chars))\n            continue\n        candidate = para if not buf\
+          \ else buf + \"\\n\\n\" + para\n        if len(candidate) > max_chars:\n\
+          \            windows.append(buf)\n            buf = para\n        else:\n\
+          \            buf = candidate\n    if buf:\n        windows.append(buf)\n\
+          \    return windows\n\n\ndef _coerce_text(text):\n    if isinstance(text,\
+          \ list):\n        return \"\\n\\n\".join(str(t) for t in text if t)\n  \
+          \  if text is None:\n        return \"\"\n    return str(text)\n\n\ndef\
+          \ main(text) -> dict:\n    return {\"windows\": split_into_windows(_coerce_text(text))}\n"
+        code_language: python3
+        desc: 段落境界で ~7000 字のウィンドウに機械分割（文書非依存）
+        outputs:
+          windows:
+            children: null
+            type: array[string]
+        selected: false
+        title: ウィンドウ分割
+        type: code
+        variables:
+        - value_selector:
+          - doc_extractor
+          - text
+          variable: text
+      height: 54
+      id: b_split_windows
+      position:
+        x: 640
+        y: 882
+      positionAbsolute:
+        x: 640
+        y: 882
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        error_handle_mode: terminated
+        height: 250
+        is_parallel: false
+        iterator_input_type: array[string]
+        iterator_selector:
+        - b_split_windows
+        - windows
+        output_selector:
+        - b_window_llm
+        - text
+        output_type: array[string]
+        parallel_nums: 5
+        selected: false
+        start_node_id: b_iter_mapstart
+        title: 各ウィンドウを処理
+        type: iteration
+        width: 460
+      height: 250
+      id: b_iter_map
+      position:
+        x: 920
+        y: 882
+      positionAbsolute:
+        x: 920
+        y: 882
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 460
+      zIndex: 1
+    - data:
+        desc: ''
+        isInIteration: true
+        selected: false
+        title: ''
+        type: iteration-start
+      draggable: false
+      height: 48
+      id: b_iter_mapstart
+      parentId: b_iter_map
+      position:
+        x: 24
+        y: 700
+      positionAbsolute:
+        x: 944
+        y: 982
+      selectable: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-iteration-start
+      width: 44
+      zIndex: 1002
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        isInIteration: true
+        isInLoop: false
+        iteration_id: b_iter_map
+        model:
+          completion_params:
+            max_tokens: 8000
+            temperature: 0.2
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: 'あなたは長い文書を整理する編集者です。与えられるのは、ある文書を機械的に区切った「一部分（ウィンドウ）」です。 このウィンドウを、章・節レベルの大きなまとまり（=ページ候補）に分け、JSON
+            配列で出力してください。
+
+
+            # 分割の単位（最重要・厳守）
+
+            - 1つのトピック = 1つの見出しとその配下の本文「すべて」。手順なら番号付きステップ全体を1つに含める。
+
+            - 番号付きの手順・ステップ・箇条書きの項目を、それぞれ別トピックに分割してはいけない（致命的な誤り）。
+
+            - 「ステップ1」「手順2」「(1)」などの小項目は決して独立したトピックにしない。親の見出しに含める。
+
+            - 見出しに付随する「注意事項」「補足」「例」等の小節は、原則その見出しのトピックに含める（独立させない）。
+
+            - 目安: 1ウィンドウあたり 1〜6 トピック程度。数十に分割するのは過剰分割であり誤り。
+
+            - 文書の種類や見出し書式に依存しない。特定の番号付け（「第N条」「事例N」等）を前提にしない。
+
+
+            # 良い例 / 悪い例
+
+            入力例: 「## 定期券を申請する\n手順を説明します。\n1. 区間を選ぶ\n2. 期間を選ぶ\n3. 申請する\n注意: 半年定期が原則。」
+
+            良い出力（1トピック）: [{"title":"定期券を申請する","content":"...手順とステップ1-3と注意をすべて含む...","continues_previous":false,"incomplete":false}]
+
+            悪い出力（過剰分割・禁止）: ステップ1, ステップ2, ステップ3, 注意 をそれぞれ別トピックにする。
+
+
+            # ウィンドウ境界の扱い（重要）
+
+            このウィンドウは文書の途中を切り出したものなので、トピックが境界をまたぐことがある。
+
+            - 冒頭が前のウィンドウから続く内容（見出しが前ウィンドウ末尾にあった等）なら、最初のトピックに "continues_previous":
+            true を付ける。
+
+            - 末尾のトピックがまだ続いて途中で切れているなら、そのトピックに "incomplete": true を付ける。
+
+            - 当てはまらないトピックは両フラグとも false。
+
+
+            # 内容の扱い
+
+            - 元の事実・数値・固有名詞・表の中身を改変・要約・省略しない。このウィンドウの内容はすべてどれかのトピックの content に入れる（取りこぼさない）。
+
+            - 表（Markdown テーブル）は崩さずそのまま content に含める。
+
+            - content は読みやすい Markdown に整える（情報の追加・創作はしない）。
+
+
+            # 出力形式（厳守）
+
+            - JSON 配列「のみ」を出力する。前置き・後書き・コードフェンスを付けない。
+
+            - 各要素: {"title": "見出し", "content": "本文(Markdown)", "continues_previous":
+            false, "incomplete": false}
+
+            - トピックが無い（空白等）場合は空配列 [] を出力する。'
+        - role: user
+          text: '# ウィンドウ本文
+
+            {{#b_iter_map.item#}}'
+        selected: false
+        title: トピック抽出
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: b_window_llm
+      parentId: b_iter_map
+      position:
+        x: 128
+        y: 700
+      positionAbsolute:
+        x: 1048
+        y: 982
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+      zIndex: 1002
+    - data:
+        code: "\nimport json\n\n\ndef _coerce_pages(window_result):\n    data = window_result\n\
+          \    if isinstance(window_result, str):\n        text = window_result.strip()\n\
+          \        if not text:\n            return []\n        try:\n           \
+          \ data = json.loads(text)\n        except Exception:\n            start\
+          \ = text.find(\"[\")\n            end = text.rfind(\"]\")\n            if\
+          \ start == -1 or end <= start:\n                return []\n            try:\n\
+          \                data = json.loads(text[start:end + 1])\n            except\
+          \ Exception:\n                return []\n    if isinstance(data, dict):\n\
+          \        data = [data]\n    if not isinstance(data, list):\n        return\
+          \ []\n    pages = []\n    for item in data:\n        if not isinstance(item,\
+          \ dict):\n            continue\n        pages.append({\n            \"title\"\
+          : str(item.get(\"title\", \"\")).strip(),\n            \"content\": str(item.get(\"\
+          content\", \"\")),\n            \"continues_previous\": bool(item.get(\"\
+          continues_previous\", False)),\n            \"incomplete\": bool(item.get(\"\
+          incomplete\", False)),\n        })\n    return pages\n\n\ndef _normalize_title(t):\n\
+          \    return \" \".join(t.split())\n\n\ndef main(window_results: list) ->\
+          \ dict:\n    merged = []\n    prev_dangling = False\n    for result in (window_results\
+          \ or []):\n        pages = _coerce_pages(result)\n        for i, page in\
+          \ enumerate(pages):\n            at_boundary = i == 0\n            same_title\
+          \ = (at_boundary and bool(merged) and bool(page[\"title\"])\n          \
+          \                and _normalize_title(merged[-1][\"title\"]) == _normalize_title(page[\"\
+          title\"]))\n            join = bool(merged) and (page[\"continues_previous\"\
+          ]\n                                     or (at_boundary and prev_dangling)\
+          \ or same_title)\n            if join:\n                tail = merged[-1]\n\
+          \                tail[\"content\"] = tail[\"content\"].rstrip() + \"\\n\\\
+          n\" + page[\"content\"].lstrip()\n                if not tail[\"title\"\
+          ] and page[\"title\"]:\n                    tail[\"title\"] = page[\"title\"\
+          ]\n            else:\n                merged.append({\"title\": page[\"\
+          title\"], \"content\": page[\"content\"]})\n        prev_dangling = bool(pages)\
+          \ and pages[-1][\"incomplete\"]\n    return {\"pages\": merged}\n"
+        code_language: python3
+        desc: ウィンドウ境界で分断されたセクションを継ぎ合わせる
+        outputs:
+          pages:
+            children: null
+            type: array[object]
+        selected: false
+        title: 継ぎ合わせ
+        type: code
+        variables:
+        - value_selector:
+          - b_iter_map
+          - output
+          variable: window_results
+      height: 54
+      id: b_merge_pages
+      position:
+        x: 1440
+        y: 882
+      positionAbsolute:
+        x: 1440
+        y: 882
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        error_handle_mode: continue-on-error
+        height: 300
+        is_parallel: false
+        iterator_input_type: array[object]
+        iterator_selector:
+        - b_merge_pages
+        - pages
+        output_selector:
+        - b_http_upsert
+        - body
+        output_type: array[string]
+        parallel_nums: 3
+        selected: false
+        start_node_id: b_iter_reducestart
+        title: 各ページを作成
+        type: iteration
+        width: 1140
+      height: 300
+      id: b_iter_reduce
+      position:
+        x: 1760
+        y: 882
+      positionAbsolute:
+        x: 1760
+        y: 882
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 1140
+      zIndex: 1
+    - data:
+        desc: ''
+        isInIteration: true
+        selected: false
+        title: ''
+        type: iteration-start
+      draggable: false
+      height: 48
+      id: b_iter_reducestart
+      parentId: b_iter_reduce
+      position:
+        x: 24
+        y: 720
+      positionAbsolute:
+        x: 1784
+        y: 1002
+      selectable: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-iteration-start
+      width: 44
+      zIndex: 1002
+    - data:
+        code: "\ndef main(item: dict) -> dict:\n    item = item or {}\n    return\
+          \ {\n        \"title\": str(item.get(\"title\", \"\")),\n        \"content\"\
+          : str(item.get(\"content\", \"\")),\n    }\n"
+        code_language: python3
+        desc: ページオブジェクトを title/content に展開
+        isInIteration: true
+        isInLoop: false
+        iteration_id: b_iter_reduce
+        outputs:
+          content:
+            children: null
+            type: string
+          title:
+            children: null
+            type: string
+        selected: false
+        title: 展開
+        type: code
+        variables:
+        - value_selector:
+          - b_iter_reduce
+          - item
+          variable: item
+      height: 54
+      id: b_unpack
+      parentId: b_iter_reduce
+      position:
+        x: 120
+        y: 720
+      positionAbsolute:
+        x: 1880
+        y: 1002
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 200
+      zIndex: 1002
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        isInIteration: true
+        isInLoop: false
+        iteration_id: b_iter_reduce
+        model:
+          completion_params:
+            max_tokens: 8000
+            temperature: 0.2
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: 'あなたは社内マニュアルを整備する編集者です。1つのトピックの素材を、社内標準テンプレートに沿った Markdown に整形してください。
+
+
+            # 出力は必ず frontmatter + 本文。frontmatter:
+
+            ---
+
+            title: 動詞+目的語のタイトル（reference/explanation は名詞可）
+
+            path: 下の「path の決め方」に従う
+
+            type: tutorial | howto | reference | explanation
+
+            audience: 対象者（不明なら 全社）
+
+            status: draft
+
+            canonical: false
+
+            ---
+
+
+            # path の決め方（重要・厳守）
+
+            - 形式: /manuals/<部署>/<業務カテゴリ>/_<type>/<タスク名>
+
+            - 各セグメントは日本語のまま書く（英語・ローマ字・slug に変換しない）。スペースは入れない。
+
+            - 部署・カテゴリはユーザー補足から判断し、不明なら「未分類」を使う。
+
+            - 例: /manuals/総務/出張/_howto/出張を申請する
+
+
+            # 本文
+
+            - 見出し直下に1-2文の要約。表は残し直前に要約平文を付ける。連番厳守。略語は定義。
+
+            - 素材に無い情報は創作しない。元の事実・数値・固有名詞・表の中身を改変しない。
+
+
+            # 出力形式（厳守）
+
+            - frontmatter を含む Markdown 本文そのものだけを出力する。``` で囲まない。前置き・説明文を付けない。'
+        - role: user
+          text: '# トピックの仮タイトル
+
+            {{#b_unpack.title#}}
+
+
+            # トピックの素材
+
+            {{#b_unpack.content#}}
+
+
+            # ユーザーからの補足（部署・カテゴリ等）
+
+            {{#sys.query#}}'
+        selected: false
+        title: ページ整形
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: b_fmt_llm
+      parentId: b_iter_reduce
+      position:
+        x: 360
+        y: 720
+      positionAbsolute:
+        x: 2120
+        y: 1002
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+      zIndex: 1002
+    - data:
+        code: "\nimport json\nimport re\n\n\ndef main(md: str, fallback_title: str)\
+          \ -> dict:\n    md = md or \"\"\n    path = \"\"\n    title = \"\"\n   \
+          \ m = re.search(r\"^path:\\s*(.+)$\", md, re.MULTILINE)\n    if m:\n   \
+          \     path = m.group(1).strip()\n    m = re.search(r\"^title:\\s*(.+)$\"\
+          , md, re.MULTILINE)\n    if m:\n        title = m.group(1).strip()\n   \
+          \ if not title:\n        title = (fallback_title or \"\").strip() or \"\
+          無題ページ\"\n    if not path:\n        path = \"/manuals/未分類/_reference/\" +\
+          \ title\n    body = json.dumps({\n        \"target_page_id\": \"\",\n  \
+          \      \"path\": path,\n        \"title\": title,\n        \"content\":\
+          \ md,\n        \"metadata\": {\"status\": \"draft\"},\n    }, ensure_ascii=False)\n\
+          \    return {\"body\": body, \"path\": path, \"title\": title}\n"
+        code_language: python3
+        desc: frontmatter から path/title を取り出し upsert ボディを組む
+        isInIteration: true
+        isInLoop: false
+        iteration_id: b_iter_reduce
+        outputs:
+          body:
+            children: null
+            type: string
+          path:
+            children: null
+            type: string
+          title:
+            children: null
+            type: string
+        selected: false
+        title: ボディ組立
+        type: code
+        variables:
+        - value_selector:
+          - b_fmt_llm
+          - text
+          variable: md
+        - value_selector:
+          - b_unpack
+          - title
+          variable: fallback_title
+      height: 54
+      id: b_fmt_build
+      parentId: b_iter_reduce
+      position:
+        x: 640
+        y: 720
+      positionAbsolute:
+        x: 2400
+        y: 1002
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 200
+      zIndex: 1002
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{{#b_fmt_build.body#}}'
+          type: raw-text
+        desc: ''
+        headers: 'Content-Type:application/json
+
+          X-API-Key:{{#env.DOCSTORE_API_KEY#}}'
+        isInIteration: true
+        isInLoop: false
+        iteration_id: b_iter_reduce
+        method: post
+        params: ''
+        selected: false
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        title: GROWI作成
+        type: http-request
+        url: '{{#env.DOCSTORE_URL#}}/pages/upsert'
+        variables: []
+      height: 120
+      id: b_http_upsert
+      parentId: b_iter_reduce
+      position:
+        x: 880
+        y: 720
+      positionAbsolute:
+        x: 2640
+        y: 1002
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 200
+      zIndex: 1002
+    - data:
+        code: "\nimport json\n\n\ndef main(results: list, expected: list) -> dict:\n\
+          \    results = results or []\n    expected = expected or []\n    lines =\
+          \ []\n    ok = 0\n    for r in results:\n        title = \"\"\n        try:\n\
+          \            d = json.loads(r) if isinstance(r, str) else r\n          \
+          \  if isinstance(d, dict):\n                title = d.get(\"title\") or\
+          \ d.get(\"path\") or \"\"\n                if d.get(\"viewer_url\") or d.get(\"\
+          id\"):\n                    ok += 1\n        except Exception:\n       \
+          \     pass\n        if title:\n            lines.append(\"- \" + str(title))\n\
+          \    total = len(expected)\n    head = str(ok) + \" / \" + str(total) +\
+          \ \" ページを作成しました。\"\n    if ok < total:\n        head += \"（\" + str(total\
+          \ - ok) + \" 件は作成に失敗しました。再実行で未作成分を補完できます）\"\n    text = head + \"\\n\" +\
+          \ \"\\n\".join(lines)\n    return {\"text\": text}\n"
+        code_language: python3
+        desc: 作成結果を集計
+        outputs:
+          text:
+            children: null
+            type: string
+        selected: false
+        title: 集計
+        type: code
+        variables:
+        - value_selector:
+          - b_iter_reduce
+          - output
+          variable: results
+        - value_selector:
+          - b_merge_pages
+          - pages
+          variable: expected
+      height: 54
+      id: b_summarize
+      position:
+        x: 2960
+        y: 882
+      positionAbsolute:
+        x: 2960
+        y: 882
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '一括取り込みが完了しました（status: draft）。GROWI で内容を確認し、問題なければ公開してください。
+
+
+          {{#b_summarize.text#}}'
+        desc: ''
+        selected: false
+        title: 完了通知
+        type: answer
+        variables: []
+      height: 150
+      id: b_answer
+      position:
+        x: 3240
+        y: 882
+      positionAbsolute:
+        x: 3240
+        y: 882
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: code
+        title: ルーター(決定的)
+        desc: 添付の有無・抽出文字数・明示キーワードで qa/register/bulk を決める
+        code_language: python3
+        code: "\"\"\"統一チャット v1: 決定的ルーティング（Dify Code ノード / ローカル単体テスト共用）。\n\nユーザー入力（メッセージ\
+          \ + 添付の抽出テキスト）を qa / register / bulk のいずれかに\n振り分ける。v1 は LLM の意図分類を使わず、**確実に判定できる材料だけ**で決める\n\
+          （誤ルートで書込系フローが誤発火するのを避けるため）。設計は\n[docs/unified-chat-design.md] を参照。\n\n規則（優先順位順）:\n\
+          1. 添付なし → qa（書込材料が無い以上、書込フローはあり得ない）\n2. 添付あり + メッセージに「分割」or「一括」 → bulk（明示指示が最優先）\n\
+          3. 添付あり + メッセージに「更新」 → register（既存ページへのマージ経路）\n4. 添付あり + 抽出テキスト > BULK_THRESHOLD_CHARS\
+          \ → bulk（1 回の LLM 出力に\n   収まらない量は分割しないと内容が欠落する）\n5. 添付あり（上記以外） → register\n\
+          \nこのファイルは標準ライブラリのみで完結しており、`main` をそのまま Dify の\nCode ノードに貼り付けられる。\n\"\"\"\
+          \n\n# bulk（分割取り込み）に切り替える抽出テキスト長の閾値。\n# 一括取り込みスプリッターのウィンドウ上限（splitter DEFAULT_MAX_CHARS）と同値:\n\
+          # 「1 回の LLM 出力に無理なく収まる量」を超えたら 1 ページ登録では欠落する。\nBULK_THRESHOLD_CHARS = 7000\n\
+          \n# 明示指示のキーワード（決定的な部分一致。正規表現・LLM は使わない）\n_BULK_KEYWORDS = (\"分割\", \"一括\"\
+          )\n_REGISTER_KEYWORDS = (\"更新\",)\n\nROUTE_QA = \"qa\"\nROUTE_REGISTER =\
+          \ \"register\"\nROUTE_BULK = \"bulk\"\n\n\ndef _coerce_text(text: object)\
+          \ -> str:\n    \"\"\"Document Extractor の出力を文字列に正規化する。\n\n    複数ファイル対応（is_array_file）の抽出ノードは\
+          \ text を array[string] で返すため、\n    リストで来たら連結して合計長で判定する。None は空文字。\n    \"\
+          \"\"\n    if isinstance(text, list):\n        return \"\\n\\n\".join(str(t)\
+          \ for t in text if t)\n    if text is None:\n        return \"\"\n    return\
+          \ str(text)\n\n\ndef decide_route(\n    query: str,\n    extracted_text:\
+          \ object,\n    threshold: int = BULK_THRESHOLD_CHARS,\n) -> str:\n    \"\
+          \"\"メッセージと抽出テキストからルートを決める（決定的）。\n\n    Args:\n        query: ユーザーのメッセージ（sys.query）。\n\
+          \        extracted_text: Document Extractor の出力（str / list[str] / None）。\n\
+          \            添付が無い場合は空になる。\n        threshold: bulk に切り替える抽出テキスト長。\n\n \
+          \   Returns:\n        \"qa\" / \"register\" / \"bulk\" のいずれか。\n    \"\"\"\
+          \n    text = _coerce_text(extracted_text)\n    q = query or \"\"\n\n   \
+          \ if not text.strip():\n        return ROUTE_QA\n    if any(k in q for k\
+          \ in _BULK_KEYWORDS):\n        return ROUTE_BULK\n    if any(k in q for\
+          \ k in _REGISTER_KEYWORDS):\n        return ROUTE_REGISTER\n    if len(text)\
+          \ > threshold:\n        return ROUTE_BULK\n    return ROUTE_REGISTER\n\n\
+          \ndef main(query: str, extracted_text: object = None) -> dict[str, str]:\n\
+          \    \"\"\"Dify Code ノード用エントリ。\n\n    Args:\n        query: sys.query。\n\
+          \        extracted_text: Document Extractor の出力（添付なしなら空/None）。\n\n    Returns:\n\
+          \        {\"route\": \"qa\"|\"register\"|\"bulk\"}。後続の IF/ELSE ノードで分岐する。\n\
+          \    \"\"\"\n    return {\"route\": decide_route(query, extracted_text)}\n"
+        outputs:
+          route:
+            type: string
+        variables:
+        - variable: query
+          value_selector:
+          - sys
+          - query
+        - variable: extracted_text
+          value_selector:
+          - doc_extractor
+          - text
+      id: router
+      position:
+        x: 640
+        y: 282
+      type: custom
+    - data:
+        type: if-else
+        title: ルート分岐
+        desc: qa / register / それ以外(bulk)
+        cases:
+        - case_id: case_qa
+          logical_operator: and
+          conditions:
+          - id: cond_qa
+            comparison_operator: is
+            value: qa
+            varType: string
+            variable_selector:
+            - router
+            - route
+        - case_id: case_register
+          logical_operator: and
+          conditions:
+          - id: cond_register
+            comparison_operator: is
+            value: register
+            varType: string
+            variable_selector:
+            - router
+            - route
+      id: route_ifelse
+      position:
+        x: 900
+        y: 282
+      type: custom

@@ -107,7 +107,14 @@
 
 ## 状態
 
-- ⬜ ルーターコア実装・単体テスト
-- ⬜ DSL 合成・ローカル実機での 3 ルート検証
+- ✅ ルーターコア実装・単体テスト 12 件（[dify/unified-chat/](../dify/unified-chat/)）
+- ✅ DSL 合成スクリプト（`tools/build_dsl.py`）と生成 DSL
+  （[dify/workflows/unified-chat-bot.yml](../dify/workflows/unified-chat-bot.yml)）
+- ✅ ローカル実機（Dify 1.9.2 + GROWI 7.4.2）で 4 ルートを一気通貫検証:
+  - 添付なし質問 → qa 分岐（出典付き回答。draft ページは「該当なし」= HITL ゲート確認）
+  - 小さい添付 → register 分岐（1 ページ draft 作成）
+  - 小さい添付 + 「分割して」 → bulk 分岐（明示上書き。2 ページ draft）
+  - 中立メッセージ + 7,211 字 → bulk 分岐（自動サイズ判定。4 ページ draft）
+  - いずれも作成ページは draft で sync にスキップされることを確認
 - v2 検討事項: LLM 意図分類の併用（決定的規則を「確定できない場合のみ」補助）、
   重複排除の統合可否、会話継続時のルート維持

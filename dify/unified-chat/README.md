@@ -7,8 +7,10 @@
 - `router/routing.py` の `main()` をそのまま Dify の Code ノードに貼り付けられる
   （標準ライブラリのみ・決定的）。
 - 統合版 Chatflow DSL は `dify/workflows/unified-chat-bot.yml`。
+  **直接編集せず**、元 DSL（質問/登録/一括の 3 本）とスクリプトを直して再生成する:
 
 ```bash
 cd dify/unified-chat
-uv run pytest -q
+uv run pytest -q                                  # ルーターの単体テスト
+uv run --with pyyaml python tools/build_dsl.py    # DSL を再生成
 ```
