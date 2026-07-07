@@ -42,6 +42,10 @@ logs/
 # Diagnostics output (会社データを含むため絶対にコミットしない)
 diagnostics/out/
 
+# Evaluation (実質問・実データを含む結果はコミットしない)
+evaluation/out/
+evaluation/questions.tsv
+
 # Test data (実マニュアルはアップしない)
 test-data/
 samples/

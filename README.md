@@ -66,9 +66,13 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 │       ├── phase1c-setup.md            # 登録 Bot の UI 構築手順 + 一気通貫テスト
 │       ├── prompts/                    # 登録 Bot のプロンプト（整形）
 │       └── README.md                   # インポート手順
-└── conventions/               # IA・ライティング規約・テンプレ
-    ├── manual-template.md     # 標準マニュアルテンプレート
-    └── writing-style.md       # ライティング規約（RAG 最適化）
+├── conventions/               # IA・ライティング規約・テンプレ
+│   ├── manual-template.md     # 標準マニュアルテンプレート
+│   └── writing-style.md       # ライティング規約（RAG 最適化）
+└── evaluation/                # 実データ評価パック（Phase 1a ゲート。会社端末で1回で実行）
+    ├── README.md              # 会社端末での実行手順（runbook）
+    ├── import_apps.py         # Bot DSL を環境値でパッチして一括インポート（stdlib のみ）
+    └── run_eval.py            # 20問評価 → 採点表を出力（stdlib のみ）
 ```
 
 **重要**: `services/` と `contracts/` は Dify 非依存。

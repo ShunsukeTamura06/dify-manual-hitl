@@ -91,6 +91,12 @@ for svc in docstore-growi sync; do
   fi
 done
 
+# RAG 品質評価の結果（evaluation/run_eval.py の出力）があれば含める
+if [ -d "${ROOT_DIR}/evaluation/out" ]; then
+  mkdir -p "${OUT_DIR}/evaluation"
+  cp -Rf "${ROOT_DIR}/evaluation/out/." "${OUT_DIR}/evaluation/" 2>/dev/null || true
+fi
+
 # 環境メタ（※ env の値は出さない。名前と設定有無のみ）
 {
   echo "collected_at: ${TS}"
