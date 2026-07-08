@@ -1,82 +1,107 @@
-"""ルーティングコアの単体テスト。
+"""ルーティングコアの単体テスト（4 ルート・LLM 意図の決定的サニタイズ）。
 
 検証の柱:
-1. 規則 1〜5 が優先順位どおりに適用される。
-2. 境界（ちょうど閾値・空クエリ・複数ファイル・None）で壊れない。
-3. 決定的であること（同じ入力は常に同じルート）。
+1. 添付の有無で書込系（register/bulk）が物理的に遮断される。
+2. LLM の意図（llm_intent）は採用されるが、事実（添付）で矯正される。
+3. 明示キーワード・サイズは決定的に優先される。
+4. 境界・異常入力で壊れない。決定的であること。
 """
 
 from router.routing import BULK_THRESHOLD_CHARS, decide_route, main
 
+# ── 添付なし: qa / dedup のみ（書込系は物理的に不可能）──
 
-def test_no_attachment_is_qa() -> None:
-    # 規則1: 添付なしは質問。書込系キーワードがあっても書込材料が無い
+
+def test_no_attachment_default_qa() -> None:
     assert decide_route("経費精算の上限は？", "") == "qa"
-    assert decide_route("このファイルを分割して", None) == "qa"
-    assert decide_route("更新して", "") == "qa"
-    assert decide_route("", "") == "qa"
+    assert decide_route("", None) == "qa"
 
 
-def test_whitespace_only_extraction_is_qa() -> None:
-    # 抽出結果が空白だけ（空ファイル等）も添付なし扱い
-    assert decide_route("質問です", "   \n\t  ") == "qa"
+def test_no_attachment_dedup_by_keyword() -> None:
+    # 「重複」の明示で dedup（LLM 判断が無くても拾う）
+    assert decide_route("/manuals/経理 の重複を整理して", "") == "dedup"
+    assert decide_route("重複排除して", None) == "dedup"
 
 
-def test_small_attachment_is_register() -> None:
-    # 規則5: 添付ありの既定は登録
-    assert decide_route("お願いします", "小さなマニュアルの本文") == "register"
-    assert decide_route("", "本文だけでメッセージなし") == "register"
+def test_no_attachment_dedup_by_llm_intent() -> None:
+    # LLM が意図を dedup と分類したら採用（自律的判断）
+    assert decide_route("似たページが多い気がする", "", llm_intent="dedup") == "dedup"
+
+
+def test_no_attachment_write_intent_is_corrected_to_qa() -> None:
+    # 添付が無いのに LLM が register/bulk を出しても qa に矯正（誤発火の遮断）
+    assert decide_route("これ登録して", "", llm_intent="register") == "qa"
+    assert decide_route("取り込んで", None, llm_intent="bulk") == "qa"
+
+
+# ── 添付あり: 書込系。決定的優先 + LLM 補助 ──
+
+
+def test_small_attachment_default_register() -> None:
+    assert decide_route("お願いします", "小さな本文") == "register"
 
 
 def test_large_attachment_is_bulk() -> None:
-    # 規則4: 閾値超えは一括取り込み
     big = "あ" * (BULK_THRESHOLD_CHARS + 1)
     assert decide_route("取り込んで", big) == "bulk"
 
 
-def test_threshold_boundary() -> None:
-    # ちょうど閾値は register（「超えたら」bulk）
+def test_threshold_boundary_is_register() -> None:
     exactly = "あ" * BULK_THRESHOLD_CHARS
     assert decide_route("お願いします", exactly) == "register"
 
 
 def test_explicit_bulk_keyword_overrides_size() -> None:
-    # 規則2: 小さくても「分割」「一括」の明示指示で bulk
-    assert decide_route("この文書を分割して取り込んで", "小さい本文") == "bulk"
-    assert decide_route("一括で取り込んでください", "小さい本文") == "bulk"
+    assert decide_route("分割して取り込んで", "小さい本文") == "bulk"
 
 
 def test_explicit_update_keyword_is_register() -> None:
-    # 規則3: 大きくても「更新」の明示指示で register（マージ経路）
     big = "あ" * (BULK_THRESHOLD_CHARS + 1)
-    assert decide_route("「会議室を予約する」を更新して", big) == "register"
+    assert decide_route("「会議室」を更新して", big) == "register"
 
 
-def test_bulk_keyword_beats_update_keyword() -> None:
-    # 規則2 > 規則3: 「分割」と「更新」が両方あれば bulk
-    assert decide_route("分割した上で更新して", "本文") == "bulk"
+def test_llm_bulk_intent_respected_when_no_decisive_signal() -> None:
+    # 決定打（キーワード・サイズ）が無いとき、LLM の bulk 提案を尊重
+    assert decide_route("これ整理して入れて", "中くらいの本文", llm_intent="bulk") == "bulk"
+
+
+def test_attachment_with_dedup_intent_corrected_to_register() -> None:
+    # 添付があるのに LLM が dedup/qa を出しても、書込対象がある以上 register に倒す
+    assert decide_route("お願い", "本文", llm_intent="dedup") == "register"
+    assert decide_route("お願い", "本文", llm_intent="qa") == "register"
+
+
+# ── LLM 出力の正規化・堅牢性 ──
+
+
+def test_llm_intent_extracted_from_noisy_output() -> None:
+    # "route: bulk" のような前後語つきでも拾う
+    big = "あ" * 100  # 小さいので決定打なし → intent 依存
+    assert decide_route("入れて", big, llm_intent="route: bulk") == "bulk"
+    assert decide_route("見て", "", llm_intent='{"intent": "dedup"}') == "dedup"
+
+
+def test_unknown_llm_intent_ignored() -> None:
+    # 未知の intent は無視され、決定的既定に落ちる
+    assert decide_route("質問です", "", llm_intent="banana") == "qa"
+    assert decide_route("お願い", "本文", llm_intent="") == "register"
 
 
 def test_multiple_files_use_total_length() -> None:
-    # 複数ファイル（array[string]）は合計長で判定
     half = "あ" * (BULK_THRESHOLD_CHARS // 2 + 100)
     assert decide_route("お願いします", [half, half]) == "bulk"
-    assert decide_route("お願いします", ["小さい", "小さい"]) == "register"
 
 
-def test_list_with_empty_items() -> None:
-    # 空要素・None が混ざっても壊れない
+def test_list_with_empty_items_is_qa() -> None:
     assert decide_route("質問です", ["", None, ""]) == "qa"
 
 
 def test_main_wrapper_shape() -> None:
-    out = main("経費精算の上限は？", "")
-    assert out == {"route": "qa"}
-    out = main("お願いします", "本文")
-    assert out == {"route": "register"}
+    assert main("経費の上限は？", "") == {"route": "qa"}
+    assert main("お願い", "本文") == {"route": "register"}
+    assert main("重複見て", "", "dedup") == {"route": "dedup"}
 
 
 def test_deterministic() -> None:
-    # 同じ入力は常に同じ結果（決定性）
-    args = ("この文書を取り込んで", "あ" * 8000)
+    args = ("これ取り込んで", "あ" * 8000)
     assert len({decide_route(*args) for _ in range(10)}) == 1

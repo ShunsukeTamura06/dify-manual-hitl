@@ -1,6 +1,6 @@
-# マニュアルアシスタント（統一チャット v1）— tools/build_dsl.py が生成
-# 質問(qa) / 登録(register) / 一括取り込み(bulk) を決定的ルーティングで 1 入口に統合。
-# 設計: docs/unified-chat-design.md。
+# マニュアルアシスタント（完全 bot）— tools/build_dsl.py が生成
+# 質問(qa)/登録(register)/一括取り込み(bulk)/重複整理(dedup) を LLM意図分類 +
+# 決定的サニタイズで 1 入口に統合。設計: docs/unified-chat-design.md。
 # **直接編集せず、元 DSL とスクリプトを直して再生成する。**
 #
 # インポート後に環境へ合わせる箇所:
@@ -8,7 +8,7 @@
 #  - q_knowledge_retrieval / similar_search の dataset_ids と Reranker 設定
 #  - environment_variables の DOCSTORE_URL / DOCSTORE_API_KEY
 app:
-  description: マニュアル統一チャット v1。質問・登録・一括取り込みを 1 つの入口で受け、決定的ルーティングで振り分ける。
+  description: マニュアルアシスタント（完全 bot）。質問・登録・一括取り込み・重複整理を 1 つの入口で受け、LLM 意図分類 + 決定的サニタイズで自律的に振り分ける。
   icon: 💬
   icon_background: '#D5F5F6'
   mode: advanced-chat
@@ -70,11 +70,13 @@ workflow:
         - local_file
         - remote_url
       number_limits: 1
-    opening_statement: 'マニュアルのことは何でもここへどうぞ。
+    opening_statement: 'マニュアルのことは何でもここへどうぞ。用件は自動で振り分けます。
 
       ・質問: そのまま聞いてください（出典付きで回答します）
 
       ・登録/更新: ファイルを添付してください（大きい文書は自動で分割します）
+
+      ・重複の整理: 「/manuals/… の重複を整理して」とお伝えください
 
       登録されたページは下書きになり、GROWI で公開すると検索に反映されます。
 
@@ -330,8 +332,99 @@ workflow:
       targetHandle: target
       type: custom
       zIndex: 0
-    - id: doc_extractor-source-router
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: d_scope-source-d_http_list
+      source: d_scope
+      sourceHandle: source
+      target: d_http_list
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: d_http_list-source-d_parse_list
+      source: d_http_list
+      sourceHandle: source
+      target: d_parse_list
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: iteration
+      id: d_parse_list-source-d_iter_content
+      source: d_parse_list
+      sourceHandle: source
+      target: d_iter_content
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: true
+        isInLoop: false
+        iteration_id: d_iter_content
+        sourceType: iteration-start
+        targetType: http-request
+      id: d_iter_contentstart-source-d_get_content
+      source: d_iter_contentstart
+      sourceHandle: source
+      target: d_get_content
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: iteration
+        targetType: code
+      id: d_iter_content-source-d_build
+      source: d_iter_content
+      sourceHandle: source
+      target: d_build
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: code
+      id: d_build-source-d_format
+      source: d_build
+      sourceHandle: source
+      target: d_format
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: d_format-source-d_answer
+      source: d_format
+      sourceHandle: source
+      target: d_answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - id: doc_extractor-source-router_llm
       source: doc_extractor
+      sourceHandle: source
+      target: router_llm
+      targetHandle: target
+      type: custom
+    - id: router_llm-source-router
+      source: router_llm
       sourceHandle: source
       target: router
       targetHandle: target
@@ -358,6 +451,12 @@ workflow:
       source: route_ifelse
       sourceHandle: case_bulk
       target: b_split_windows
+      targetHandle: target
+      type: custom
+    - id: route_ifelse-case_dedup-d_scope
+      source: route_ifelse
+      sourceHandle: case_dedup
+      target: d_scope
       targetHandle: target
       type: custom
     - id: route_ifelse-false-route_fallback_answer
@@ -1534,46 +1633,447 @@ workflow:
       type: custom
       width: 244
     - data:
+        code: "\ndef main(query: str) -> dict:\n    q = (query or \"\").strip()\n\
+          \    prefix = \"/manuals\"\n    for tok in q.split():\n        if tok.startswith(\"\
+          /\"):\n            prefix = tok\n            break\n    return {\"prefix\"\
+          : prefix}\n"
+        code_language: python3
+        desc: 対象パス接頭辞を決める（既定 /manuals）
+        outputs:
+          prefix:
+            children: null
+            type: string
+        selected: false
+        title: 対象範囲
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          variable: query
+      height: 54
+      id: d_scope
+      position:
+        x: 360
+        y: 1382
+      positionAbsolute:
+        x: 360
+        y: 1382
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: ''
+          type: none
+        desc: Wiki 全ページの一覧を取得
+        headers: X-API-Key:{{#env.DOCSTORE_API_KEY#}}
+        method: get
+        params: ''
+        selected: false
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        title: ページ一覧取得
+        type: http-request
+        url: '{{#env.DOCSTORE_URL#}}/pages?limit=500'
+        variables: []
+      height: 120
+      id: d_http_list
+      position:
+        x: 640
+        y: 1382
+      positionAbsolute:
+        x: 640
+        y: 1382
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "\nimport json\n\ndef main(body, prefix: str) -> dict:\n    try:\n \
+          \       d = json.loads(body) if isinstance(body, str) else (body or {})\n\
+          \    except Exception:\n        d = {}\n    pages = d.get(\"pages\", [])\
+          \ if isinstance(d, dict) else []\n    prefix = prefix or \"/manuals\"\n\
+          \    ids = []\n    metas = []\n    for p in pages:\n        if not isinstance(p,\
+          \ dict):\n            continue\n        path = str(p.get(\"path\", \"\"\
+          ))\n        pid = str(p.get(\"id\", \"\"))\n        if not pid or not path.startswith(prefix):\n\
+          \            continue\n        ids.append(pid)\n        metas.append({\"\
+          id\": pid, \"title\": str(p.get(\"title\", \"\")), \"path\": path})\n  \
+          \  return {\"page_ids\": ids, \"metas\": metas}\n"
+        code_language: python3
+        desc: 接頭辞でフィルタしページIDとメタを出す（30件上限に注意）
+        outputs:
+          metas:
+            children: null
+            type: array[object]
+          page_ids:
+            children: null
+            type: array[string]
+        selected: false
+        title: 一覧フィルタ
+        type: code
+        variables:
+        - value_selector:
+          - d_http_list
+          - body
+          variable: body
+        - value_selector:
+          - d_scope
+          - prefix
+          variable: prefix
+      height: 54
+      id: d_parse_list
+      position:
+        x: 920
+        y: 1382
+      positionAbsolute:
+        x: 920
+        y: 1382
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        error_handle_mode: terminated
+        height: 200
+        is_parallel: false
+        iterator_input_type: array[string]
+        iterator_selector:
+        - d_parse_list
+        - page_ids
+        output_selector:
+        - d_get_content
+        - body
+        output_type: array[string]
+        parallel_nums: 3
+        selected: false
+        start_node_id: d_iter_contentstart
+        title: 各ページ本文取得
+        type: iteration
+        width: 420
+      height: 200
+      id: d_iter_content
+      position:
+        x: 1200
+        y: 1382
+      positionAbsolute:
+        x: 1200
+        y: 1382
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 420
+      zIndex: 1
+    - data:
+        desc: ''
+        isInIteration: true
+        selected: false
+        title: ''
+        type: iteration-start
+      draggable: false
+      height: 48
+      id: d_iter_contentstart
+      parentId: d_iter_content
+      position:
+        x: 24
+        y: 1180
+      positionAbsolute:
+        x: 1224
+        y: 1462
+      selectable: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-iteration-start
+      width: 44
+      zIndex: 1002
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{"page_id": "{{#d_iter_content.item#}}"}'
+          type: raw-text
+        desc: ''
+        headers: 'Content-Type:application/json
+
+          X-API-Key:{{#env.DOCSTORE_API_KEY#}}'
+        isInIteration: true
+        isInLoop: false
+        iteration_id: d_iter_content
+        method: post
+        params: ''
+        selected: false
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        title: 本文取得
+        type: http-request
+        url: '{{#env.DOCSTORE_URL#}}/pages/get-content'
+        variables: []
+      height: 120
+      id: d_get_content
+      parentId: d_iter_content
+      position:
+        x: 120
+        y: 1170
+      positionAbsolute:
+        x: 1320
+        y: 1452
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+      zIndex: 1002
+    - data:
+        code: "\nimport json\nimport difflib\n\nHIGH_OVERLAP = 0.8\nCANDIDATE_OVERLAP\
+          \ = 0.5\nTITLE_AGREE_OVERLAP = 0.5\n\ndef _norm(text):\n    return \" \"\
+          .join((text or \"\").split())\n\ndef overlap_ratio(a, b):\n    return difflib.SequenceMatcher(None,\
+          \ _norm(a), _norm(b)).ratio()\n\ndef cluster_min_overlap(texts):\n    if\
+          \ len(texts) < 2:\n        return 1.0\n    worst = 1.0\n    for i in range(len(texts)):\n\
+          \        for j in range(i + 1, len(texts)):\n            worst = min(worst,\
+          \ overlap_ratio(texts[i], texts[j]))\n    return worst\n\ndef _build_clusters(ids,\
+          \ pairs, min_score):\n    parent = {i: i for i in ids}\n    def find(x):\n\
+          \        while parent[x] != x:\n            parent[x] = parent[parent[x]]\n\
+          \            x = parent[x]\n        return x\n    def union(a, b):\n   \
+          \     ra, rb = find(a), find(b)\n        if ra != rb:\n            parent[ra]\
+          \ = rb\n    for a, b, score in pairs:\n        if a in parent and b in parent\
+          \ and score >= min_score:\n            union(a, b)\n    groups = {}\n  \
+          \  for i in ids:\n        groups.setdefault(find(i), []).append(i)\n   \
+          \ clusters = [g for g in groups.values() if len(g) >= 2]\n    clusters.sort(key=lambda\
+          \ g: ids.index(g[0]))\n    return clusters\n\ndef titles_similarity(titles):\n\
+          \    norm = [_norm(t) for t in titles if _norm(t)]\n    if len(norm) < 2:\n\
+          \        return 1.0\n    total, count = 0.0, 0\n    for i in range(len(norm)):\n\
+          \        for j in range(i + 1, len(norm)):\n            total += difflib.SequenceMatcher(None,\
+          \ norm[i], norm[j]).ratio()\n            count += 1\n    return total /\
+          \ count\n\ndef classify_confidence(min_overlap, titles_agree):\n    if min_overlap\
+          \ >= HIGH_OVERLAP and titles_agree:\n        return \"high\"\n    return\
+          \ \"review\"\n\ndef build_proposals(pages, pairs, min_score):\n    by_id\
+          \ = {str(p.get(\"id\", \"\")): p for p in pages}\n    ids = [str(p.get(\"\
+          id\", \"\")) for p in pages]\n    clusters = _build_clusters(ids, pairs,\
+          \ min_score)\n    proposals = []\n    for n, cluster in enumerate(clusters,\
+          \ start=1):\n        members = [by_id[i] for i in cluster if i in by_id]\n\
+          \        texts = [str(m.get(\"content\", \"\")) for m in members]\n    \
+          \    titles = [str(m.get(\"title\", \"\")) for m in members]\n        min_ov\
+          \ = cluster_min_overlap(texts)\n        titles_agree = titles_similarity(titles)\
+          \ >= TITLE_AGREE_OVERLAP\n        confidence = classify_confidence(min_ov,\
+          \ titles_agree)\n        rep = max(members, key=lambda m: len(str(m.get(\"\
+          content\", \"\"))))\n        proposals.append({\n            \"cluster_id\"\
+          : n,\n            \"page_ids\": [str(m.get(\"id\", \"\")) for m in members],\n\
+          \            \"titles\": titles,\n            \"representative_title\":\
+          \ str(rep.get(\"title\", \"\")),\n            \"representative_path\": str(rep.get(\"\
+          path\", \"\")),\n            \"min_overlap\": round(min_ov, 3),\n      \
+          \      \"confidence\": confidence,\n            \"lane\": \"bulk\" if confidence\
+          \ == \"high\" else \"individual\",\n        })\n    return proposals\n\n\
+          def candidate_pairs_from_content(pages, threshold):\n    ids = [str(p.get(\"\
+          id\", \"\")) for p in pages]\n    texts = [str(p.get(\"content\", \"\"))\
+          \ for p in pages]\n    pairs = []\n    for i in range(len(pages)):\n   \
+          \     for j in range(i + 1, len(pages)):\n            ratio = overlap_ratio(texts[i],\
+          \ texts[j])\n            if ratio >= threshold:\n                pairs.append((ids[i],\
+          \ ids[j], ratio))\n    return pairs\n\ndef main(metas, contents) -> dict:\n\
+          \    metas = metas or []\n    contents = contents or []\n    pages = []\n\
+          \    for i, m in enumerate(metas):\n        raw = contents[i] if i < len(contents)\
+          \ else \"\"\n        try:\n            cj = json.loads(raw) if isinstance(raw,\
+          \ str) else (raw or {})\n        except Exception:\n            cj = {}\n\
+          \        content = cj.get(\"content\", \"\") if isinstance(cj, dict) else\
+          \ \"\"\n        pages.append({\n            \"id\": str(m.get(\"id\", \"\
+          \")),\n            \"title\": str(m.get(\"title\", \"\")),\n           \
+          \ \"path\": str(m.get(\"path\", \"\")),\n            \"content\": str(content),\n\
+          \        })\n    pairs = candidate_pairs_from_content(pages, CANDIDATE_OVERLAP)\n\
+          \    return {\"proposals\": build_proposals(pages, pairs, CANDIDATE_OVERLAP)}\n"
+        code_language: python3
+        desc: 本文総当たりで候補ペア→クラスタ→確信度→提案を組み立てる
+        outputs:
+          proposals:
+            children: null
+            type: array[object]
+        selected: false
+        title: 重複提案を組み立て
+        type: code
+        variables:
+        - value_selector:
+          - d_parse_list
+          - metas
+          variable: metas
+        - value_selector:
+          - d_iter_content
+          - output
+          variable: contents
+      height: 54
+      id: d_build
+      position:
+        x: 1720
+        y: 1382
+      positionAbsolute:
+        x: 1720
+        y: 1382
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "\ndef main(proposals) -> dict:\n    proposals = proposals or []\n \
+          \   bulk = [p for p in proposals if p.get(\"lane\") == \"bulk\"]\n    review\
+          \ = [p for p in proposals if p.get(\"lane\") != \"bulk\"]\n    lines = []\n\
+          \    lines.append(\"重複候補を \" + str(len(proposals)) + \" クラスタ検出しました。\")\n\
+          \    lines.append(\"\")\n    if bulk:\n        lines.append(\"【高確信・一括承認候補】(\"\
+          \ + str(len(bulk)) + \"件)\")\n        for p in bulk:\n            lines.append(\"\
+          - 「\" + str(p.get(\"representative_title\", \"\")) + \"」 重複 \"\n       \
+          \                  + str(len(p.get(\"page_ids\", []))) + \"ページ (重なり \"\n\
+          \                         + str(round(p.get(\"min_overlap\", 0) * 100))\
+          \ + \"%)\")\n            for t in p.get(\"titles\", []):\n             \
+          \   lines.append(\"    ・\" + str(t))\n        lines.append(\"\")\n    if\
+          \ review:\n        lines.append(\"【要確認・個別承認】(\" + str(len(review)) + \"\
+          件)\")\n        for p in review:\n            lines.append(\"- 「\" + str(p.get(\"\
+          representative_title\", \"\")) + \"」 類似 \"\n                         + str(len(p.get(\"\
+          page_ids\", []))) + \"ページ (重なり \"\n                         + str(round(p.get(\"\
+          min_overlap\", 0) * 100)) + \"%, 要確認)\")\n            for t in p.get(\"\
+          titles\", []):\n                lines.append(\"    ・\" + str(t))\n     \
+          \   lines.append(\"\")\n    if not proposals:\n        lines.append(\"(重複候補は見つかりませんでした)\"\
+          )\n    lines.append(\"※ これは提案です。統合の実行は次段（承認→LLM統合→反映）で行います。\")\n    return\
+          \ {\"text\": \"\\n\".join(lines)}\n"
+        code_language: python3
+        desc: 提案をlane別に読みやすく整形
+        outputs:
+          text:
+            children: null
+            type: string
+        selected: false
+        title: 提案を整形
+        type: code
+        variables:
+        - value_selector:
+          - d_build
+          - proposals
+          variable: proposals
+      height: 54
+      id: d_format
+      position:
+        x: 2000
+        y: 1382
+      positionAbsolute:
+        x: 2000
+        y: 1382
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '{{#d_format.text#}}'
+        desc: ''
+        selected: false
+        title: 提案を返す
+        type: answer
+        variables: []
+      height: 120
+      id: d_answer
+      position:
+        x: 2280
+        y: 1382
+      positionAbsolute:
+        x: 2280
+        y: 1382
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: 意図分類(ルーターLLM)
+        desc: 意図を qa/register/bulk/dedup に分類。最終決定はルーターCodeが事実で矯正
+        model:
+          completion_params:
+            temperature: 0
+            max_tokens: 20
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: 'ユーザーのメッセージから、望む操作を1語で分類せよ。
+
+            - qa: マニュアルの内容について質問している
+
+            - register: 資料（ファイル）を登録・更新したい
+
+            - bulk: 大きな資料を分割して一括取り込みしたい
+
+            - dedup: 既存ページの重複を整理・確認したい
+
+            迷ったら qa。回答は qa / register / bulk / dedup のいずれか1語のみ。'
+        - role: user
+          text: '{{#sys.query#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+      id: router_llm
+      position:
+        x: 500
+        y: 282
+      type: custom
+    - data:
         type: code
         title: ルーター(決定的)
-        desc: 添付の有無・抽出文字数・明示キーワードで qa/register/bulk を決める
+        desc: 添付有無・文字数・キーワード + LLM意図 で qa/register/bulk/dedup を決定
         code_language: python3
-        code: "\"\"\"統一チャット v1: 決定的ルーティング（Dify Code ノード / ローカル単体テスト共用）。\n\nユーザー入力（メッセージ\
-          \ + 添付の抽出テキスト）を qa / register / bulk のいずれかに\n振り分ける。v1 は LLM の意図分類を使わず、**確実に判定できる材料だけ**で決める\n\
-          （誤ルートで書込系フローが誤発火するのを避けるため）。設計は\n[docs/unified-chat-design.md] を参照。\n\n規則（優先順位順）:\n\
-          1. 添付なし → qa（書込材料が無い以上、書込フローはあり得ない）\n2. 添付あり + メッセージに「分割」or「一括」 → bulk（明示指示が最優先）\n\
-          3. 添付あり + メッセージに「更新」 → register（既存ページへのマージ経路）\n4. 添付あり + 抽出テキスト > BULK_THRESHOLD_CHARS\
-          \ → bulk（1 回の LLM 出力に\n   収まらない量は分割しないと内容が欠落する）\n5. 添付あり（上記以外） → register\n\
-          \n優先順位の根拠（曖昧な指示の倒し方）:\n- 規則 2 > 3（「分割して更新して」は bulk）: 誤って bulk に倒れても新規 draft\
-          \ が\n  増えるだけで人が捨てられる。誤って register(更新) に倒れると**既存ページ本文を\n  書き換える**（GROWI 履歴で戻せるが影響が大きい）。迷ったら影響の小さい方に倒す。\n\
-          - 規則 3 > 4（大きい更新素材も register）: bulk は既存ページを更新できない\n  （新規作成のみ）ため、「更新」の明示指示を尊重する。巨大な更新素材はマージ\
-          \ LLM の\n  出力上限で欠落し得るのは既知の制約（v2 課題。docs/unified-chat-design.md 参照）。\n\n\
-          このファイルは標準ライブラリのみで完結しており、`main` をそのまま Dify の\nCode ノードに貼り付けられる。\n\"\"\"\n\
-          \n# bulk（分割取り込み）に切り替える抽出テキスト長の閾値。\n# 一括取り込みスプリッターのウィンドウ上限（splitter DEFAULT_MAX_CHARS）と同値:\n\
-          # 「1 回の LLM 出力に無理なく収まる量」を超えたら 1 ページ登録では欠落する。\nBULK_THRESHOLD_CHARS = 7000\n\
-          \n# 明示指示のキーワード（決定的な部分一致。正規表現・LLM は使わない）\n_BULK_KEYWORDS = (\"分割\", \"一括\"\
-          )\n_REGISTER_KEYWORDS = (\"更新\",)\n\nROUTE_QA = \"qa\"\nROUTE_REGISTER =\
-          \ \"register\"\nROUTE_BULK = \"bulk\"\n\n\ndef _coerce_text(text: object)\
-          \ -> str:\n    \"\"\"Document Extractor の出力を文字列に正規化する。\n\n    複数ファイル対応（is_array_file）の抽出ノードは\
+        code: "\"\"\"統一チャット（完全 bot）: 決定的サニタイズ付きルーティング。\n\nqa / register / bulk / dedup\
+          \ の 4 機能を 1 入口で振り分ける。ユーザーはどの機能かを\n選ばず、bot が意図を汲んで自律的にルートを決める。設計は\n[docs/unified-chat-design.md]\
+          \ を参照。\n\n方針:\n- **添付の有無・抽出文字数・明示キーワードは決定的に判定**する（書込系フローの\n  誤発火を防ぐ。ここを\
+          \ LLM に委ねると、質問のつもりが書き込まれる等の事故が起きる）。\n- **意図が曖昧な部分（質問か重複整理の依頼か等）は LLM の分類結果（llm_intent）を\n\
+          \  採用**する＝自律的。ただし LLM の結果は必ず「添付という物理的事実」で矯正する\n  （添付が無いのに書込系を選ぶ、を許さない）。\n\
+          \nルート:\n- qa       : 質問応答（RAG）\n- register : 1 ファイル → 1 ページ登録／既存ページへのマージ更新\n\
+          - bulk     : 大きな文書を複数ページに分割取り込み\n- dedup    : Wiki の重複ページを検出して統合を提案（提示まで）\n\
+          \nこのファイルは標準ライブラリのみで完結しており、`main` をそのまま Dify の\nCode ノードに貼り付けられる。\n\"\"\"\
+          \n\n# bulk（分割取り込み）に切り替える抽出テキスト長の閾値（スプリッターのウィンドウ上限）。\nBULK_THRESHOLD_CHARS\
+          \ = 7000\n\n# 決定的に優先する明示キーワード（正規表現・LLM は使わない）\n_BULK_KEYWORDS = (\"分割\"\
+          , \"一括\")\n_REGISTER_KEYWORDS = (\"更新\",)\n_DEDUP_KEYWORDS = (\"重複\", \"\
+          重複排除\")\n\nROUTE_QA = \"qa\"\nROUTE_REGISTER = \"register\"\nROUTE_BULK\
+          \ = \"bulk\"\nROUTE_DEDUP = \"dedup\"\n_VALID_ROUTES = (ROUTE_QA, ROUTE_REGISTER,\
+          \ ROUTE_BULK, ROUTE_DEDUP)\n\n\ndef _coerce_text(text: object) -> str:\n\
+          \    \"\"\"Document Extractor の出力を文字列に正規化する。\n\n    複数ファイル対応（is_array_file）の抽出ノードは\
           \ text を array[string] で返すため、\n    リストで来たら連結して合計長で判定する。None は空文字。\n    \"\
           \"\"\n    if isinstance(text, list):\n        return \"\\n\\n\".join(str(t)\
           \ for t in text if t)\n    if text is None:\n        return \"\"\n    return\
-          \ str(text)\n\n\ndef decide_route(\n    query: str,\n    extracted_text:\
-          \ object,\n    threshold: int = BULK_THRESHOLD_CHARS,\n) -> str:\n    \"\
-          \"\"メッセージと抽出テキストからルートを決める（決定的）。\n\n    Args:\n        query: ユーザーのメッセージ（sys.query）。\n\
-          \        extracted_text: Document Extractor の出力（str / list[str] / None）。\n\
-          \            添付が無い場合は空になる。\n        threshold: bulk に切り替える抽出テキスト長。\n\n \
-          \   Returns:\n        \"qa\" / \"register\" / \"bulk\" のいずれか。\n    \"\"\"\
-          \n    text = _coerce_text(extracted_text)\n    q = query or \"\"\n\n   \
-          \ if not text.strip():\n        return ROUTE_QA\n    if any(k in q for k\
-          \ in _BULK_KEYWORDS):\n        return ROUTE_BULK\n    if any(k in q for\
-          \ k in _REGISTER_KEYWORDS):\n        return ROUTE_REGISTER\n    if len(text)\
-          \ > threshold:\n        return ROUTE_BULK\n    return ROUTE_REGISTER\n\n\
-          \ndef main(query: str, extracted_text: object = None) -> dict[str, str]:\n\
-          \    \"\"\"Dify Code ノード用エントリ。\n\n    Args:\n        query: sys.query。\n\
-          \        extracted_text: Document Extractor の出力（添付なしなら空/None）。\n\n    Returns:\n\
-          \        {\"route\": \"qa\"|\"register\"|\"bulk\"}。後続の IF/ELSE ノードで分岐する。\n\
-          \    \"\"\"\n    return {\"route\": decide_route(query, extracted_text)}\n"
+          \ str(text)\n\n\ndef _clean_intent(llm_intent: object) -> str:\n    \"\"\
+          \"ルーター LLM の出力からルート名を取り出す（前後の語や記号を許容）。\n\n    LLM は \"bulk\" のように 1 語で返す想定だが、\"\
+          route: dedup\" や全角・引用符混じりでも\n    拾えるよう部分一致で正規化する。未知の出力は空文字（＝LLM 判断なし扱い）。\n\
+          \    \"\"\"\n    s = str(llm_intent or \"\").strip().lower()\n    for route\
+          \ in _VALID_ROUTES:\n        if route in s:\n            return route\n\
+          \    return \"\"\n\n\ndef decide_route(\n    query: str,\n    extracted_text:\
+          \ object,\n    llm_intent: object = None,\n    threshold: int = BULK_THRESHOLD_CHARS,\n\
+          ) -> str:\n    \"\"\"メッセージ・添付・LLM 意図から最終ルートを決める（決定的サニタイズ）。\n\n    Args:\n\
+          \        query: ユーザーのメッセージ（sys.query）。\n        extracted_text: Document\
+          \ Extractor の出力（str / list[str] / None）。\n            添付が無い場合は空になる。\n  \
+          \      llm_intent: ルーター LLM が分類した意図（qa/register/bulk/dedup）。無くてもよい。\n  \
+          \      threshold: bulk に切り替える抽出テキスト長。\n\n    Returns:\n        \"qa\" /\
+          \ \"register\" / \"bulk\" / \"dedup\" のいずれか。\n    \"\"\"\n    text = _coerce_text(extracted_text)\n\
+          \    q = query or \"\"\n    intent = _clean_intent(llm_intent)\n    has_attachment\
+          \ = bool(text.strip())\n\n    if not has_attachment:\n        # 添付なし＝書込材料が無い。register/bulk\
+          \ は物理的にあり得ないので、\n        # LLM が書込系を提案しても qa/dedup に矯正する（誤発火の遮断）。\n    \
+          \    if intent == ROUTE_DEDUP or any(k in q for k in _DEDUP_KEYWORDS):\n\
+          \            return ROUTE_DEDUP\n        return ROUTE_QA\n\n    # 添付あり＝書込系。誤ると影響が大きいので、確実に判定できる材料を優先する。\n\
+          \    if any(k in q for k in _BULK_KEYWORDS):\n        return ROUTE_BULK\n\
+          \    if any(k in q for k in _REGISTER_KEYWORDS):\n        return ROUTE_REGISTER\n\
+          \    if len(text) > threshold:\n        return ROUTE_BULK\n    # 決定打が無ければ\
+          \ LLM の bulk 提案だけ尊重（分割は取り逃すと欠落する）。\n    # dedup/qa は添付ありでは選べない（書込対象があるため\
+          \ register に倒す）。\n    if intent == ROUTE_BULK:\n        return ROUTE_BULK\n\
+          \    return ROUTE_REGISTER\n\n\ndef main(query: str, extracted_text: object\
+          \ = None, llm_intent: object = None) -> dict[str, str]:\n    \"\"\"Dify\
+          \ Code ノード用エントリ。\n\n    Args:\n        query: sys.query。\n        extracted_text:\
+          \ Document Extractor の出力（添付なしなら空/None）。\n        llm_intent: ルーター LLM の分類結果（無くてもよい）。\n\
+          \n    Returns:\n        {\"route\": \"qa\"|\"register\"|\"bulk\"|\"dedup\"\
+          }。後続の IF/ELSE で分岐する。\n    \"\"\"\n    return {\"route\": decide_route(query,\
+          \ extracted_text, llm_intent)}\n"
         outputs:
           route:
             type: string
@@ -1586,9 +2086,13 @@ workflow:
           value_selector:
           - doc_extractor
           - text
+        - variable: llm_intent
+          value_selector:
+          - router_llm
+          - text
       id: router
       position:
-        x: 640
+        x: 700
         y: 282
       type: custom
     - data:
@@ -1626,9 +2130,19 @@ workflow:
             variable_selector:
             - router
             - route
+        - case_id: case_dedup
+          logical_operator: and
+          conditions:
+          - id: cond_dedup
+            comparison_operator: is
+            value: dedup
+            varType: string
+            variable_selector:
+            - router
+            - route
       id: route_ifelse
       position:
-        x: 900
+        x: 960
         y: 282
       type: custom
     - data:
@@ -1640,6 +2154,8 @@ workflow:
           ・質問の場合: そのままメッセージでお送りください
 
           ・登録の場合: ファイルを添付してください
+
+          ・重複整理の場合: 「/manuals/… の重複を整理して」のようにお伝えください
 
           '
       id: route_fallback_answer

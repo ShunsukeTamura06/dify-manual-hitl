@@ -1,5 +1,21 @@
-"""統一チャット v1 の決定的ルーティングコア。"""
+"""統一チャット（完全 bot）のルーティングコア。"""
 
-from .routing import BULK_THRESHOLD_CHARS, decide_route, main
+from .routing import (
+    BULK_THRESHOLD_CHARS,
+    ROUTE_BULK,
+    ROUTE_DEDUP,
+    ROUTE_QA,
+    ROUTE_REGISTER,
+    decide_route,
+    main,
+)
 
-__all__ = ["BULK_THRESHOLD_CHARS", "decide_route", "main"]
+__all__ = [
+    "BULK_THRESHOLD_CHARS",
+    "ROUTE_BULK",
+    "ROUTE_DEDUP",
+    "ROUTE_QA",
+    "ROUTE_REGISTER",
+    "decide_route",
+    "main",
+]
