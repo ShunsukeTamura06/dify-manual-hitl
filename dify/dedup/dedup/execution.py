@@ -170,12 +170,14 @@ def main(
         pages: 承認ターンで再取得した現在の Wiki ページ。
 
     Returns:
-        {"approved": bool, "jobs": [...], "count": ジョブ数}。
-        approved=False のときは jobs 空（実行しない）。
+        {"mode": "execute"|"propose", "approved": bool, "jobs": [...], "count": ジョブ数}。
+        承認語があり統合対象（高確信クラスタ）があるときだけ mode="execute"。
+        それ以外は "propose"（提示のみ）。会話変数を使わず、実行ターンで再検出する
+        （検出は決定的なので冪等。統合済みは再検出で候補に挙がらない）。
     """
     approved = is_approval(query)
-    if not approved:
-        return {"approved": False, "jobs": [], "count": 0}
-    executable = select_executable(proposals or [])
-    jobs = prepare_merge_jobs(executable, pages or [])
-    return {"approved": True, "jobs": jobs, "count": len(jobs)}
+    jobs: list[dict[str, Any]] = []
+    if approved:
+        jobs = prepare_merge_jobs(select_executable(proposals or []), pages or [])
+    mode = "execute" if (approved and jobs) else "propose"
+    return {"mode": mode, "approved": approved, "jobs": jobs, "count": len(jobs)}

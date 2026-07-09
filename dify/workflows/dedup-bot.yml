@@ -1,12 +1,8 @@
-# 重複排除Bot（提案フロー v1: ①解析→②提案→③提示）— HITL「提案→承認→実行」の前半
-# Wiki の既存ページを走査し、重複クラスタを検出して「高確信=一括 / 要確認=個別」に振り分けて提示する。
-# 候補ペアは本文の総当たり difflib で決定的に生成（意味検索は大規模化時に差し替え）。
-# 検出・提案組立ロジックは dify/dedup/dedup/clustering.py と同一（ローカル単体テスト済み）。
-#
-# v1 は③提示まで。④承認→⑤統合(LLM統合→upsert/退役)は次スライス。
-# インポート後の環境合わせ: environment_variables.DOCSTORE_URL。
+# 重複排除Bot — dify/dedup/tools/build_dedup_dsl.py が生成（提示→承認→統合→退役）
+# 決定的ロジックの真実は dify/dedup/（clustering.py / execution.py）とテスト。
+# インポート後: environment_variables の DOCSTORE_URL / DOCSTORE_API_KEY、LLM モデル。
 app:
-  description: '重複排除Bot. Wikiの重複ページを検出し、統合候補を確信度つきで提案する（v1 提示まで）。'
+  description: 重複排除Bot. Wikiの重複ページを検出し、統合候補を確信度つきで提案する（v1 提示まで）。
   icon: 🧹
   icon_background: '#EDE9FE'
   mode: advanced-chat
@@ -18,7 +14,7 @@ version: 0.4.0
 workflow:
   conversation_variables: []
   environment_variables:
-  - description: 'DocStore Adapter の API キー（ADAPTER_API_KEY を設定した場合のみ。空なら認証なし）'
+  - description: DocStore Adapter の API キー（ADAPTER_API_KEY を設定した場合のみ。空なら認証なし）
     id: fb03aecb-ccaf-49f7-9095-c813f01acff6
     name: DOCSTORE_API_KEY
     selector:
@@ -56,11 +52,13 @@ workflow:
         - local_file
         - remote_url
       number_limits: 1
-    opening_statement: '重複チェックしたい範囲のパス接頭辞を送ってください（例: /manuals/dedup-test）。
+    opening_statement: '重複ページの整理を手伝います。
 
-      省略すると /manuals 全体を対象にします。重複候補を確信度つきで提案します（統合の実行は次段）。
+      ・確認: 「/manuals/… の重複を整理して」→ 重複候補を提示します
 
-      '
+      ・統合: 「統合して」「実行」→ 高確信の重複を実際に統合し、重複元を退役します
+
+      統合先は下書きになり、GROWI で公開すると反映されます。'
     retriever_resource:
       enabled: false
     sensitive_word_avoidance:
@@ -153,18 +151,6 @@ workflow:
         isInIteration: false
         isInLoop: false
         sourceType: code
-        targetType: code
-      id: e_build_format
-      source: build
-      sourceHandle: source
-      target: format
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: code
         targetType: answer
       id: e_format_answer
       source: format
@@ -173,6 +159,106 @@ workflow:
       targetHandle: target
       type: custom
       zIndex: 0
+    - id: build-source-decide
+      source: build
+      sourceHandle: source
+      target: decide
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: false
+    - id: decide-source-mode_ifelse
+      source: decide
+      sourceHandle: source
+      target: mode_ifelse
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: false
+    - id: mode_ifelse-false-format
+      source: mode_ifelse
+      sourceHandle: 'false'
+      target: format
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: false
+    - id: mode_ifelse-case_execute-merge_iter
+      source: mode_ifelse
+      sourceHandle: case_execute
+      target: merge_iter
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: false
+    - id: merge_iter-source-exec_answer
+      source: merge_iter
+      sourceHandle: source
+      target: exec_answer
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: false
+    - id: merge_iterstart-source-m_unpack
+      source: merge_iterstart
+      sourceHandle: source
+      target: m_unpack
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: true
+        iteration_id: merge_iter
+      zIndex: 1002
+    - id: m_unpack-source-m_merge_llm
+      source: m_unpack
+      sourceHandle: source
+      target: m_merge_llm
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: true
+        iteration_id: merge_iter
+      zIndex: 1002
+    - id: m_merge_llm-source-m_build_body
+      source: m_merge_llm
+      sourceHandle: source
+      target: m_build_body
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: true
+        iteration_id: merge_iter
+      zIndex: 1002
+    - id: m_build_body-source-m_http_upsert
+      source: m_build_body
+      sourceHandle: source
+      target: m_http_upsert
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: true
+        iteration_id: merge_iter
+      zIndex: 1002
+    - id: m_http_upsert-source-m_dep_body
+      source: m_http_upsert
+      sourceHandle: source
+      target: m_dep_body
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: true
+        iteration_id: merge_iter
+      zIndex: 1002
+    - id: m_dep_body-source-m_http_deprecate
+      source: m_dep_body
+      sourceHandle: source
+      target: m_http_deprecate
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: true
+        iteration_id: merge_iter
+      zIndex: 1002
     nodes:
     - data:
         desc: ''
@@ -193,16 +279,10 @@ workflow:
       type: custom
       width: 244
     - data:
-        code: |
-
-          def main(query: str) -> dict:
-              q = (query or "").strip()
-              prefix = "/manuals"
-              for tok in q.split():
-                  if tok.startswith("/"):
-                      prefix = tok
-                      break
-              return {"prefix": prefix}
+        code: "\ndef main(query: str) -> dict:\n    q = (query or \"\").strip()\n\
+          \    prefix = \"/manuals\"\n    for tok in q.split():\n        if tok.startswith(\"\
+          /\"):\n            prefix = tok\n            break\n    return {\"prefix\"\
+          : prefix}\n"
         code_language: python3
         desc: 対象パス接頭辞を決める（既定 /manuals）
         outputs:
@@ -237,7 +317,7 @@ workflow:
           data: ''
           type: none
         desc: Wiki 全ページの一覧を取得
-        headers: 'X-API-Key:{{#env.DOCSTORE_API_KEY#}}'
+        headers: X-API-Key:{{#env.DOCSTORE_API_KEY#}}
         method: get
         params: ''
         selected: false
@@ -262,29 +342,16 @@ workflow:
       type: custom
       width: 244
     - data:
-        code: |
-
-          import json
-
-          def main(body, prefix: str) -> dict:
-              try:
-                  d = json.loads(body) if isinstance(body, str) else (body or {})
-              except Exception:
-                  d = {}
-              pages = d.get("pages", []) if isinstance(d, dict) else []
-              prefix = prefix or "/manuals"
-              ids = []
-              metas = []
-              for p in pages:
-                  if not isinstance(p, dict):
-                      continue
-                  path = str(p.get("path", ""))
-                  pid = str(p.get("id", ""))
-                  if not pid or not path.startswith(prefix):
-                      continue
-                  ids.append(pid)
-                  metas.append({"id": pid, "title": str(p.get("title", "")), "path": path})
-              return {"page_ids": ids, "metas": metas}
+        code: "\nimport json\n\ndef main(body, prefix: str) -> dict:\n    try:\n \
+          \       d = json.loads(body) if isinstance(body, str) else (body or {})\n\
+          \    except Exception:\n        d = {}\n    pages = d.get(\"pages\", [])\
+          \ if isinstance(d, dict) else []\n    prefix = prefix or \"/manuals\"\n\
+          \    ids = []\n    metas = []\n    for p in pages:\n        if not isinstance(p,\
+          \ dict):\n            continue\n        path = str(p.get(\"path\", \"\"\
+          ))\n        pid = str(p.get(\"id\", \"\"))\n        if not pid or not path.startswith(prefix):\n\
+          \            continue\n        ids.append(pid)\n        metas.append({\"\
+          id\": pid, \"title\": str(p.get(\"title\", \"\")), \"path\": path})\n  \
+          \  return {\"page_ids\": ids, \"metas\": metas}\n"
         code_language: python3
         desc: 接頭辞でフィルタしページIDとメタを出す（30件上限に注意）
         outputs:
@@ -381,7 +448,9 @@ workflow:
           data: '{"page_id": "{{#iter_content.item#}}"}'
           type: raw-text
         desc: ''
-        headers: "Content-Type:application/json\nX-API-Key:{{#env.DOCSTORE_API_KEY#}}"
+        headers: 'Content-Type:application/json
+
+          X-API-Key:{{#env.DOCSTORE_API_KEY#}}'
         isInIteration: true
         isInLoop: false
         iteration_id: iter_content
@@ -411,126 +480,71 @@ workflow:
       width: 244
       zIndex: 1002
     - data:
-        code: |
-
-          import json
-          import difflib
-
-          HIGH_OVERLAP = 0.8
-          CANDIDATE_OVERLAP = 0.5
-          TITLE_AGREE_OVERLAP = 0.5
-
-          def _norm(text):
-              return " ".join((text or "").split())
-
-          def overlap_ratio(a, b):
-              return difflib.SequenceMatcher(None, _norm(a), _norm(b)).ratio()
-
-          def cluster_min_overlap(texts):
-              if len(texts) < 2:
-                  return 1.0
-              worst = 1.0
-              for i in range(len(texts)):
-                  for j in range(i + 1, len(texts)):
-                      worst = min(worst, overlap_ratio(texts[i], texts[j]))
-              return worst
-
-          def _build_clusters(ids, pairs, min_score):
-              parent = {i: i for i in ids}
-              def find(x):
-                  while parent[x] != x:
-                      parent[x] = parent[parent[x]]
-                      x = parent[x]
-                  return x
-              def union(a, b):
-                  ra, rb = find(a), find(b)
-                  if ra != rb:
-                      parent[ra] = rb
-              for a, b, score in pairs:
-                  if a in parent and b in parent and score >= min_score:
-                      union(a, b)
-              groups = {}
-              for i in ids:
-                  groups.setdefault(find(i), []).append(i)
-              clusters = [g for g in groups.values() if len(g) >= 2]
-              clusters.sort(key=lambda g: ids.index(g[0]))
-              return clusters
-
-          def titles_similarity(titles):
-              norm = [_norm(t) for t in titles if _norm(t)]
-              if len(norm) < 2:
-                  return 1.0
-              total, count = 0.0, 0
-              for i in range(len(norm)):
-                  for j in range(i + 1, len(norm)):
-                      total += difflib.SequenceMatcher(None, norm[i], norm[j]).ratio()
-                      count += 1
-              return total / count
-
-          def classify_confidence(min_overlap, titles_agree):
-              if min_overlap >= HIGH_OVERLAP and titles_agree:
-                  return "high"
-              return "review"
-
-          def build_proposals(pages, pairs, min_score):
-              by_id = {str(p.get("id", "")): p for p in pages}
-              ids = [str(p.get("id", "")) for p in pages]
-              clusters = _build_clusters(ids, pairs, min_score)
-              proposals = []
-              for n, cluster in enumerate(clusters, start=1):
-                  members = [by_id[i] for i in cluster if i in by_id]
-                  texts = [str(m.get("content", "")) for m in members]
-                  titles = [str(m.get("title", "")) for m in members]
-                  min_ov = cluster_min_overlap(texts)
-                  titles_agree = titles_similarity(titles) >= TITLE_AGREE_OVERLAP
-                  confidence = classify_confidence(min_ov, titles_agree)
-                  rep = max(members, key=lambda m: len(str(m.get("content", ""))))
-                  proposals.append({
-                      "cluster_id": n,
-                      "page_ids": [str(m.get("id", "")) for m in members],
-                      "titles": titles,
-                      "representative_title": str(rep.get("title", "")),
-                      "representative_path": str(rep.get("path", "")),
-                      "min_overlap": round(min_ov, 3),
-                      "confidence": confidence,
-                      "lane": "bulk" if confidence == "high" else "individual",
-                  })
-              return proposals
-
-          def candidate_pairs_from_content(pages, threshold):
-              ids = [str(p.get("id", "")) for p in pages]
-              texts = [str(p.get("content", "")) for p in pages]
-              pairs = []
-              for i in range(len(pages)):
-                  for j in range(i + 1, len(pages)):
-                      ratio = overlap_ratio(texts[i], texts[j])
-                      if ratio >= threshold:
-                          pairs.append((ids[i], ids[j], ratio))
-              return pairs
-
-          def main(metas, contents) -> dict:
-              metas = metas or []
-              contents = contents or []
-              pages = []
-              for i, m in enumerate(metas):
-                  raw = contents[i] if i < len(contents) else ""
-                  try:
-                      cj = json.loads(raw) if isinstance(raw, str) else (raw or {})
-                  except Exception:
-                      cj = {}
-                  content = cj.get("content", "") if isinstance(cj, dict) else ""
-                  pages.append({
-                      "id": str(m.get("id", "")),
-                      "title": str(m.get("title", "")),
-                      "path": str(m.get("path", "")),
-                      "content": str(content),
-                  })
-              pairs = candidate_pairs_from_content(pages, CANDIDATE_OVERLAP)
-              return {"proposals": build_proposals(pages, pairs, CANDIDATE_OVERLAP)}
+        code: "\nimport json\nimport difflib\n\nHIGH_OVERLAP = 0.8\nCANDIDATE_OVERLAP\
+          \ = 0.5\nTITLE_AGREE_OVERLAP = 0.5\n\ndef _norm(text):\n    return \" \"\
+          .join((text or \"\").split())\n\ndef overlap_ratio(a, b):\n    return difflib.SequenceMatcher(None,\
+          \ _norm(a), _norm(b)).ratio()\n\ndef cluster_min_overlap(texts):\n    if\
+          \ len(texts) < 2:\n        return 1.0\n    worst = 1.0\n    for i in range(len(texts)):\n\
+          \        for j in range(i + 1, len(texts)):\n            worst = min(worst,\
+          \ overlap_ratio(texts[i], texts[j]))\n    return worst\n\ndef _build_clusters(ids,\
+          \ pairs, min_score):\n    parent = {i: i for i in ids}\n    def find(x):\n\
+          \        while parent[x] != x:\n            parent[x] = parent[parent[x]]\n\
+          \            x = parent[x]\n        return x\n    def union(a, b):\n   \
+          \     ra, rb = find(a), find(b)\n        if ra != rb:\n            parent[ra]\
+          \ = rb\n    for a, b, score in pairs:\n        if a in parent and b in parent\
+          \ and score >= min_score:\n            union(a, b)\n    groups = {}\n  \
+          \  for i in ids:\n        groups.setdefault(find(i), []).append(i)\n   \
+          \ clusters = [g for g in groups.values() if len(g) >= 2]\n    clusters.sort(key=lambda\
+          \ g: ids.index(g[0]))\n    return clusters\n\ndef titles_similarity(titles):\n\
+          \    norm = [_norm(t) for t in titles if _norm(t)]\n    if len(norm) < 2:\n\
+          \        return 1.0\n    total, count = 0.0, 0\n    for i in range(len(norm)):\n\
+          \        for j in range(i + 1, len(norm)):\n            total += difflib.SequenceMatcher(None,\
+          \ norm[i], norm[j]).ratio()\n            count += 1\n    return total /\
+          \ count\n\ndef classify_confidence(min_overlap, titles_agree):\n    if min_overlap\
+          \ >= HIGH_OVERLAP and titles_agree:\n        return \"high\"\n    return\
+          \ \"review\"\n\ndef build_proposals(pages, pairs, min_score):\n    by_id\
+          \ = {str(p.get(\"id\", \"\")): p for p in pages}\n    ids = [str(p.get(\"\
+          id\", \"\")) for p in pages]\n    clusters = _build_clusters(ids, pairs,\
+          \ min_score)\n    proposals = []\n    for n, cluster in enumerate(clusters,\
+          \ start=1):\n        members = [by_id[i] for i in cluster if i in by_id]\n\
+          \        texts = [str(m.get(\"content\", \"\")) for m in members]\n    \
+          \    titles = [str(m.get(\"title\", \"\")) for m in members]\n        min_ov\
+          \ = cluster_min_overlap(texts)\n        titles_agree = titles_similarity(titles)\
+          \ >= TITLE_AGREE_OVERLAP\n        confidence = classify_confidence(min_ov,\
+          \ titles_agree)\n        rep = max(members, key=lambda m: len(str(m.get(\"\
+          content\", \"\"))))\n        proposals.append({\n            \"cluster_id\"\
+          : n,\n            \"page_ids\": [str(m.get(\"id\", \"\")) for m in members],\n\
+          \            \"titles\": titles,\n            \"representative_id\": str(rep.get(\"\
+          id\", \"\")),\n                \"representative_title\": str(rep.get(\"\
+          title\", \"\")),\n            \"representative_path\": str(rep.get(\"path\"\
+          , \"\")),\n            \"min_overlap\": round(min_ov, 3),\n            \"\
+          confidence\": confidence,\n            \"lane\": \"bulk\" if confidence\
+          \ == \"high\" else \"individual\",\n        })\n    return proposals\n\n\
+          def candidate_pairs_from_content(pages, threshold):\n    ids = [str(p.get(\"\
+          id\", \"\")) for p in pages]\n    texts = [str(p.get(\"content\", \"\"))\
+          \ for p in pages]\n    pairs = []\n    for i in range(len(pages)):\n   \
+          \     for j in range(i + 1, len(pages)):\n            ratio = overlap_ratio(texts[i],\
+          \ texts[j])\n            if ratio >= threshold:\n                pairs.append((ids[i],\
+          \ ids[j], ratio))\n    return pairs\n\ndef main(metas, contents) -> dict:\n\
+          \    metas = metas or []\n    contents = contents or []\n    pages = []\n\
+          \    for i, m in enumerate(metas):\n        raw = contents[i] if i < len(contents)\
+          \ else \"\"\n        try:\n            cj = json.loads(raw) if isinstance(raw,\
+          \ str) else (raw or {})\n        except Exception:\n            cj = {}\n\
+          \        if isinstance(cj, dict) and cj.get(\"status\") == \"deprecated\"\
+          :\n            continue\n        content = cj.get(\"content\", \"\") if\
+          \ isinstance(cj, dict) else \"\"\n        pages.append({\n            \"\
+          id\": str(m.get(\"id\", \"\")),\n            \"title\": str(m.get(\"title\"\
+          , \"\")),\n            \"path\": str(m.get(\"path\", \"\")),\n         \
+          \   \"content\": str(content),\n        })\n    pairs = candidate_pairs_from_content(pages,\
+          \ CANDIDATE_OVERLAP)\n    return {\"proposals\": build_proposals(pages,\
+          \ pairs, CANDIDATE_OVERLAP), \"pages\": pages}\n"
         code_language: python3
         desc: 本文総当たりで候補ペア→クラスタ→確信度→提案を組み立てる
         outputs:
           proposals:
+            children: null
+            type: array[object]
+          pages:
             children: null
             type: array[object]
         selected: false
@@ -558,37 +572,26 @@ workflow:
       type: custom
       width: 244
     - data:
-        code: |
-
-          def main(proposals) -> dict:
-              proposals = proposals or []
-              bulk = [p for p in proposals if p.get("lane") == "bulk"]
-              review = [p for p in proposals if p.get("lane") != "bulk"]
-              lines = []
-              lines.append("重複候補を " + str(len(proposals)) + " クラスタ検出しました。")
-              lines.append("")
-              if bulk:
-                  lines.append("【高確信・一括承認候補】(" + str(len(bulk)) + "件)")
-                  for p in bulk:
-                      lines.append("- 「" + str(p.get("representative_title", "")) + "」 重複 "
-                                   + str(len(p.get("page_ids", []))) + "ページ (重なり "
-                                   + str(round(p.get("min_overlap", 0) * 100)) + "%)")
-                      for t in p.get("titles", []):
-                          lines.append("    ・" + str(t))
-                  lines.append("")
-              if review:
-                  lines.append("【要確認・個別承認】(" + str(len(review)) + "件)")
-                  for p in review:
-                      lines.append("- 「" + str(p.get("representative_title", "")) + "」 類似 "
-                                   + str(len(p.get("page_ids", []))) + "ページ (重なり "
-                                   + str(round(p.get("min_overlap", 0) * 100)) + "%, 要確認)")
-                      for t in p.get("titles", []):
-                          lines.append("    ・" + str(t))
-                  lines.append("")
-              if not proposals:
-                  lines.append("(重複候補は見つかりませんでした)")
-              lines.append("※ これは提案です。統合の実行は次段（承認→LLM統合→反映）で行います。")
-              return {"text": "\n".join(lines)}
+        code: "\ndef main(proposals) -> dict:\n    proposals = proposals or []\n \
+          \   bulk = [p for p in proposals if p.get(\"lane\") == \"bulk\"]\n    review\
+          \ = [p for p in proposals if p.get(\"lane\") != \"bulk\"]\n    lines = []\n\
+          \    lines.append(\"重複候補を \" + str(len(proposals)) + \" クラスタ検出しました。\")\n\
+          \    lines.append(\"\")\n    if bulk:\n        lines.append(\"【高確信・一括承認候補】(\"\
+          \ + str(len(bulk)) + \"件)\")\n        for p in bulk:\n            lines.append(\"\
+          - 「\" + str(p.get(\"representative_title\", \"\")) + \"」 重複 \"\n       \
+          \                  + str(len(p.get(\"page_ids\", []))) + \"ページ (重なり \"\n\
+          \                         + str(round(p.get(\"min_overlap\", 0) * 100))\
+          \ + \"%)\")\n            for t in p.get(\"titles\", []):\n             \
+          \   lines.append(\"    ・\" + str(t))\n        lines.append(\"\")\n    if\
+          \ review:\n        lines.append(\"【要確認・個別承認】(\" + str(len(review)) + \"\
+          件)\")\n        for p in review:\n            lines.append(\"- 「\" + str(p.get(\"\
+          representative_title\", \"\")) + \"」 類似 \"\n                         + str(len(p.get(\"\
+          page_ids\", []))) + \"ページ (重なり \"\n                         + str(round(p.get(\"\
+          min_overlap\", 0) * 100)) + \"%, 要確認)\")\n            for t in p.get(\"\
+          titles\", []):\n                lines.append(\"    ・\" + str(t))\n     \
+          \   lines.append(\"\")\n    if not proposals:\n        lines.append(\"(重複候補は見つかりませんでした)\"\
+          )\n    lines.append(\"※ 高確信の重複を統合するには「統合して」「実行」と送ってください\"\n            \
+          \     \"（統合先は下書き、重複元は退役になります）。\")\n    return {\"text\": \"\\n\".join(lines)}\n"
         code_language: python3
         desc: 提案をlane別に読みやすく整形
         outputs:
@@ -634,6 +637,347 @@ workflow:
       targetPosition: left
       type: custom
       width: 244
+    - data:
+        type: code
+        title: 実行判定
+        code_language: python3
+        code: "\nimport difflib\n\n_APPROVAL_KEYWORDS = (\"承認\", \"統合して\", \"統合する\"\
+          , \"実行\", \"まとめて\", \"ok\", \"はい\")\n\n\ndef _is_approval(query):\n    q\
+          \ = (query or \"\").strip().lower()\n    return bool(q) and any(k in q for\
+          \ k in _APPROVAL_KEYWORDS)\n\n\ndef _prepare_jobs(proposals, pages):\n \
+          \   by_id = {str(p.get(\"id\", \"\")): p for p in (pages or [])}\n    jobs\
+          \ = []\n    for prop in proposals or []:\n        if prop.get(\"lane\")\
+          \ != \"bulk\":\n            continue\n        page_ids = [str(i) for i in\
+          \ prop.get(\"page_ids\", [])]\n        members = [by_id[i] for i in page_ids\
+          \ if i in by_id]\n        if len(members) < 2:\n            continue\n \
+          \       rep_id = str(prop.get(\"representative_id\", \"\"))\n        if\
+          \ rep_id not in by_id:\n            rep = max(members, key=lambda m: len(str(m.get(\"\
+          content\", \"\"))))\n            rep_id = str(rep.get(\"id\", \"\"))\n \
+          \       rep = by_id[rep_id]\n        merge_input = \"\\n\\n\".join(\n  \
+          \          \"## \" + str(m.get(\"title\", \"\")) + \"\\n\" + str(m.get(\"\
+          content\", \"\")) for m in members\n        )\n        jobs.append({\n \
+          \           \"representative_id\": rep_id,\n            \"representative_path\"\
+          : str(rep.get(\"path\", \"\")),\n            \"representative_title\": str(rep.get(\"\
+          title\", \"\")),\n            \"merge_input\": merge_input,\n          \
+          \  \"deprecated_ids\": [i for i in page_ids if i != rep_id and i in by_id],\n\
+          \        })\n    return jobs\n\n\ndef main(query, proposals, pages) -> dict:\n\
+          \    approved = _is_approval(query)\n    jobs = _prepare_jobs(proposals\
+          \ or [], pages or []) if approved else []\n    mode = \"execute\" if (approved\
+          \ and jobs) else \"propose\"\n    return {\"mode\": mode, \"jobs\": jobs,\
+          \ \"count\": len(jobs)}\n"
+        desc: 承認語があり高確信クラスタがあれば execute。無ければ propose（提示のみ）
+        outputs:
+          mode:
+            children: null
+            type: string
+          jobs:
+            children: null
+            type: array[object]
+          count:
+            children: null
+            type: number
+        variables:
+        - variable: query
+          value_selector:
+          - sys
+          - query
+        - variable: proposals
+          value_selector:
+          - build
+          - proposals
+        - variable: pages
+          value_selector:
+          - build
+          - pages
+      id: decide
+      position:
+        x: 1900
+        y: 282
+      type: custom
+    - data:
+        type: if-else
+        title: モード分岐
+        desc: execute（統合実行） / それ以外は propose（提示）
+        cases:
+        - case_id: case_execute
+          logical_operator: and
+          conditions:
+          - id: cond_execute
+            comparison_operator: is
+            value: execute
+            varType: string
+            variable_selector:
+            - decide
+            - mode
+      id: mode_ifelse
+      position:
+        x: 2160
+        y: 282
+      type: custom
+    - data:
+        type: iteration
+        title: 各クラスタを統合
+        desc: '高確信クラスタごとに: 統合本文生成 → 統合先を更新 → 重複元を退役'
+        error_handle_mode: terminated
+        is_parallel: false
+        parallel_nums: 3
+        iterator_input_type: array[object]
+        iterator_selector:
+        - decide
+        - jobs
+        output_selector:
+        - m_http_deprecate
+        - body
+        output_type: array[string]
+        start_node_id: merge_iterstart
+        width: 620
+        height: 250
+      id: merge_iter
+      position:
+        x: 2420
+        y: 420
+      type: custom
+    - data:
+        type: iteration-start
+        title: ''
+        desc: ''
+        isInIteration: true
+      id: merge_iterstart
+      position:
+        x: 20
+        y: 90
+      type: custom
+      parentId: merge_iter
+      zIndex: 1002
+    - data:
+        type: code
+        title: ジョブ展開
+        code_language: python3
+        code: "\ndef main(item: dict) -> dict:\n    item = item or {}\n    return\
+          \ {\n        \"merge_input\": str(item.get(\"merge_input\", \"\")),\n  \
+          \      \"representative_id\": str(item.get(\"representative_id\", \"\")),\n\
+          \        \"representative_path\": str(item.get(\"representative_path\",\
+          \ \"\")),\n        \"representative_title\": str(item.get(\"representative_title\"\
+          , \"\")),\n        \"deprecated_ids\": item.get(\"deprecated_ids\", []),\n\
+          \    }\n"
+        outputs:
+          merge_input:
+            children: null
+            type: string
+          representative_id:
+            children: null
+            type: string
+          representative_path:
+            children: null
+            type: string
+          representative_title:
+            children: null
+            type: string
+          deprecated_ids:
+            children: null
+            type: array[string]
+        variables:
+        - variable: item
+          value_selector:
+          - merge_iter
+          - item
+        isInIteration: true
+        iteration_id: merge_iter
+      id: m_unpack
+      position:
+        x: 140
+        y: 90
+      type: custom
+      parentId: merge_iter
+      zIndex: 1002
+    - data:
+        type: llm
+        title: 統合本文生成
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o-mini
+          mode: chat
+          completion_params:
+            temperature: 0.2
+            max_tokens: 4000
+        prompt_template:
+        - role: system
+          text: '複数の重複ページを 1 つに統合したマニュアル本文を作る。
+
+            - **全ページの主張を保持**する。要約で情報を落とさない（欠落は最も避けるべき失敗）。
+
+            - 重複する記述は 1 つにまとめる。矛盾する記述は両方残し、どちらが新しい/正しいか確認を促す注記を付ける。
+
+            - frontmatter を含む Markdown 本文そのものだけを出力。``` で囲まない。status は書かない（後段が draft
+            を設定する）。'
+        - role: user
+          text: '統合対象の重複ページ群:
+
+
+            {{#m_unpack.merge_input#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+        isInIteration: true
+        iteration_id: merge_iter
+      id: m_merge_llm
+      position:
+        x: 360
+        y: 90
+      type: custom
+      parentId: merge_iter
+      zIndex: 1002
+    - data:
+        type: code
+        title: upsertボディ組立
+        code_language: python3
+        code: "\nimport json\n\n\ndef main(target_page_id: str, path: str, title:\
+          \ str, content: str) -> dict:\n    lines = content.split(\"\\n\")\n    if\
+          \ lines and lines[0].strip() == \"---\":\n        try:\n            end\
+          \ = lines[1:].index(\"---\") + 1\n        except ValueError:\n         \
+          \   end = -1\n        if end > 0:\n            fm = [ln for ln in lines[1:end]\
+          \ if not ln.strip().startswith(\"status:\")]\n            fm.append(\"status:\
+          \ draft\")\n            content = \"\\n\".join([\"---\"] + fm + lines[end:])\n\
+          \    else:\n        content = \"---\\nstatus: draft\\n---\\n\" + content\n\
+          \    body = json.dumps({\n        \"target_page_id\": target_page_id or\
+          \ \"\",\n        \"path\": path, \"title\": title,\n        \"content\"\
+          : content, \"metadata\": {},\n    }, ensure_ascii=False)\n    return {\"\
+          body\": body}\n"
+        outputs:
+          body:
+            children: null
+            type: string
+        variables:
+        - variable: target_page_id
+          value_selector:
+          - m_unpack
+          - representative_id
+        - variable: path
+          value_selector:
+          - m_unpack
+          - representative_path
+        - variable: title
+          value_selector:
+          - m_unpack
+          - representative_title
+        - variable: content
+          value_selector:
+          - m_merge_llm
+          - text
+        isInIteration: true
+        iteration_id: merge_iter
+      id: m_build_body
+      position:
+        x: 580
+        y: 90
+      type: custom
+      parentId: merge_iter
+      zIndex: 1002
+    - data:
+        type: http-request
+        title: 統合先を更新
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{{#m_build_body.body#}}'
+          type: raw-text
+        headers: 'Content-Type:application/json
+
+          X-API-Key:{{#env.DOCSTORE_API_KEY#}}'
+        method: post
+        params: ''
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        url: '{{#env.DOCSTORE_URL#}}/pages/upsert'
+        isInIteration: true
+        iteration_id: merge_iter
+      id: m_http_upsert
+      position:
+        x: 800
+        y: 90
+      type: custom
+      parentId: merge_iter
+      zIndex: 1002
+    - data:
+        type: code
+        title: 退役ボディ組立
+        code_language: python3
+        code: "\nimport json\n\n\ndef main(deprecated_ids, redirect_path: str) ->\
+          \ dict:\n    body = json.dumps({\n        \"page_ids\": list(deprecated_ids\
+          \ or []),\n        \"redirect_path\": redirect_path or \"\",\n    }, ensure_ascii=False)\n\
+          \    return {\"body\": body}\n"
+        outputs:
+          body:
+            children: null
+            type: string
+        variables:
+        - variable: deprecated_ids
+          value_selector:
+          - m_unpack
+          - deprecated_ids
+        - variable: redirect_path
+          value_selector:
+          - m_unpack
+          - representative_path
+        isInIteration: true
+        iteration_id: merge_iter
+      id: m_dep_body
+      position:
+        x: 1020
+        y: 90
+      type: custom
+      parentId: merge_iter
+      zIndex: 1002
+    - data:
+        type: http-request
+        title: 重複元を退役
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: '{{#m_dep_body.body#}}'
+          type: raw-text
+        headers: 'Content-Type:application/json
+
+          X-API-Key:{{#env.DOCSTORE_API_KEY#}}'
+        method: post
+        params: ''
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+        url: '{{#env.DOCSTORE_URL#}}/pages/deprecate'
+        isInIteration: true
+        iteration_id: merge_iter
+      id: m_http_deprecate
+      position:
+        x: 1240
+        y: 90
+      type: custom
+      parentId: merge_iter
+      zIndex: 1002
+    - data:
+        type: answer
+        title: 統合完了通知
+        answer: '{{#decide.count#}} 件の重複クラスタを統合しました。
+
+
+          統合先は下書き（draft）にしました。GROWI で内容を確認して公開してください。
+
+          重複元は退役（deprecated）にし、統合先へのリンクを付けました（検索には出ません）。
+
+          ※ 統合は情報の欠落が起きていないか、公開前に必ずご確認ください。'
+        variables: []
+      id: exec_answer
+      position:
+        x: 2680
+        y: 560
+      type: custom
     viewport:
       x: 0
       y: 0

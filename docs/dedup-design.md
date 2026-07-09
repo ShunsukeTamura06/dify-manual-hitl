@@ -59,13 +59,20 @@
 ## スコープと進捗
 - ✅ `dify/dedup/`: 候補ペア → クラスタ化（union-find）→ 重なり統計（difflib）→ 確信度振り分け
   → 提案データ構造、を **純粋ロジック＋単体テスト**で実装（文書非依存・stdlib のみ）。
-- ✅ **Dify 配線 v1＝提示まで**（[dify/workflows/dedup-bot.yml](../dify/workflows/dedup-bot.yml)）。
+- ✅ **Dify 配線＝提示まで**（[dify/workflows/dedup-bot.yml](../dify/workflows/dedup-bot.yml)）。
   一覧取得 → 接頭辞フィルタ → 各本文取得(Iteration) → 提案組立(Code) → lane 別提示。
-  **候補ペアは v1 では本文総当たり difflib で生成**（意味検索=Knowledge Retrieval は大規模化時に
-  差し替え）。ローカル Dify + 実 GROWI で一気通貫検証済み（高確信/一括・要確認/個別の振り分けを
-  実データで確認）。
-- ⬜ ④承認→⑤実行（対話で承認 → LLM 統合 → Adapter upsert/退役）。← 次ステップ。
-- ⬜ 統合本文生成プロンプト（事実保持・矛盾注記）と完全性チェック。← 次ステップ。
+  **候補ペアは本文総当たり difflib で生成**（意味検索=Knowledge Retrieval は大規模化時に差し替え）。
+- ✅ **④承認→⑤実行（統合→退役）を実装・実機検証済み**（`dify/dedup/execution.py` +
+  `dify/dedup/tools/build_dedup_dsl.py` で DSL に execute 分岐を合成）:
+  - 承認は**単一ターンの承認語**で判定（会話変数を使わない。実行ターンで再検出＝冪等）。
+  - **高確信（lane=bulk）クラスタのみ自動統合**。要確認は提示のまま（人の個別判断）。
+  - 各クラスタ: 統合LLM（事実保持・矛盾注記）→ 統合先(representative)を **draft で upsert** →
+    重複元を **`POST /pages/deprecate`**（status:deprecated + 統合先リンク）。
+  - **冪等**: 退役ページは検出から除外（status:deprecated をスキップ）。2 回目は 0 クラスタ。
+  - ローカル Dify + 実 GROWI で検証（提示→統合→退役→sync除外→再実行0件）。完全 bot 経由でも動作。
+- ✅ 完全性チェック（`check_completeness`）を実装（元ページの主張が統合本文に残るか監視）。
+  現状は core とテストのみ。**DSL への組み込み（警告表示）は次ステップ**。
+- ⬜ 要確認(individual)レーンの個別承認 UI、意味検索での候補生成（大規模化）。← 次ステップ。
 
 > v1 の制約: Dify Code ノード配列出力 30 要素上限のため、対象を接頭辞でスコープして 30 ページ
 > 以下にする前提。全社規模では一覧側のページング/分割か `CODE_MAX_*_ARRAY_LENGTH` 引き上げが要る。

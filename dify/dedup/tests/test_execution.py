@@ -131,21 +131,28 @@ def test_completeness_flags_dropped_facts() -> None:
 # ── main ラッパー ──
 
 
-def test_main_not_approved() -> None:
+def test_main_not_approved_is_propose() -> None:
     pages = _sample_cluster_pages()
     proposals = build_proposals_from_content(pages)
     out = main("これ何？", proposals, pages)
-    assert out == {"approved": False, "jobs": [], "count": 0}
+    assert out["mode"] == "propose"
+    assert out["approved"] is False
+    assert out["jobs"] == []
 
 
-def test_main_approved_builds_jobs() -> None:
+def test_main_approved_builds_jobs_execute() -> None:
     pages = _sample_cluster_pages()
     proposals = build_proposals_from_content(pages)
-    out = main("承認します", proposals, pages)
+    out = main("統合して実行", proposals, pages)
+    assert out["mode"] == "execute"
     assert out["approved"] is True
     assert out["count"] == 1
     assert out["jobs"][0]["representative_id"] == "p1"
 
 
-def test_main_handles_empty() -> None:
-    assert main("承認", None, None) == {"approved": True, "jobs": [], "count": 0}
+def test_main_approved_but_no_jobs_is_propose() -> None:
+    # 承認語はあるが統合対象（高確信クラスタ）が無ければ propose に倒す
+    out = main("承認", [], [])
+    assert out["mode"] == "propose"
+    assert out["approved"] is True
+    assert out["count"] == 0

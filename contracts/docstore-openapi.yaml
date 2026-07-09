@@ -155,6 +155,44 @@ paths:
         '409':
           description: パス重複（新規作成時）
 
+  /pages/deprecate:
+    post:
+      tags: [pages]
+      summary: 複数ページを退役する（重複統合の実行用）
+      description: |
+        指定ページを status: deprecated にし、本文冒頭に統合先へのリンクを追記する。
+        即削除でなく退役に留める（原典を破壊しない・戻せる）。退役ページは sync が
+        Dify に同期しない（検索から消える）。冪等: 既に deprecated でも再実行して無害。
+        重複排除 Bot の統合実行フローが、統合先へマージした後に重複元を退役させる。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [page_ids]
+              properties:
+                page_ids:
+                  type: array
+                  items: { type: string }
+                redirect_path:
+                  type: string
+                  description: 統合先パス（退役ページ本文にリンクとして追記）
+      responses:
+        '200':
+          description: OK（一部失敗しても errors に記録し全体は止めない）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deprecated:
+                    type: array
+                    items: { type: string }
+                  errors:
+                    type: array
+                    items: { type: string }
+
   /pages/get-content:
     post:
       tags: [pages]
