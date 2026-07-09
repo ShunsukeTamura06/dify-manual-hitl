@@ -1,7 +1,7 @@
 [project]
 name = "unified-chat-router"
 version = "0.1.0"
-description = "統一チャット v1 の決定的ルーティングコア（qa / register / bulk の振り分け）"
+description = "統一チャット(完全bot)のルーティングコア（qa/register/bulk/dedup/pending の振り分け）"
 readme = "README.md"
 requires-python = ">=3.11"
 # 本体は標準ライブラリのみ。Dify Code ノードのサンドボックスでそのまま動かすため外部依存を持たない。
@@ -20,6 +20,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# DSL 合成スクリプトはノード構築の dict リテラルが幅広
+"tools/build_dsl.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

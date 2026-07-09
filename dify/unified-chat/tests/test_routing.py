@@ -1,4 +1,4 @@
-"""ルーティングコアの単体テスト（4 ルート・LLM 意図の決定的サニタイズ）。
+"""ルーティングコアの単体テスト（5 ルート・LLM 意図の決定的サニタイズ）。
 
 検証の柱:
 1. 添付の有無で書込系（register/bulk）が物理的に遮断される。
@@ -9,7 +9,7 @@
 
 from router.routing import BULK_THRESHOLD_CHARS, decide_route, main
 
-# ── 添付なし: qa / dedup のみ（書込系は物理的に不可能）──
+# ── 添付なし: qa / dedup / pending のみ（書込系は物理的に不可能）──
 
 
 def test_no_attachment_default_qa() -> None:
@@ -32,6 +32,23 @@ def test_no_attachment_write_intent_is_corrected_to_qa() -> None:
     # 添付が無いのに LLM が register/bulk を出しても qa に矯正（誤発火の遮断）
     assert decide_route("これ登録して", "", llm_intent="register") == "qa"
     assert decide_route("取り込んで", None, llm_intent="bulk") == "qa"
+
+
+def test_no_attachment_pending_by_keyword() -> None:
+    # 「承認待ち」等の明示で pending（読み取り専用。書込リスクなし）
+    assert decide_route("承認待ちのページを教えて", "") == "pending"
+    assert decide_route("下書き一覧を見せて", None) == "pending"
+    assert decide_route("未承認のページは？", "") == "pending"
+
+
+def test_no_attachment_pending_by_llm_intent() -> None:
+    # LLM が意図を pending と分類したら採用（自律的判断）
+    assert decide_route("今どれくらい溜まってる？", "", llm_intent="pending") == "pending"
+
+
+def test_pending_keyword_takes_priority_over_dedup() -> None:
+    # 両方に触れる曖昧な文言でも pending（読み取り専用）を優先（安全側）
+    assert decide_route("承認待ちで重複してそうなのある？", "") == "pending"
 
 
 # ── 添付あり: 書込系。決定的優先 + LLM 補助 ──
@@ -71,6 +88,11 @@ def test_attachment_with_dedup_intent_corrected_to_register() -> None:
     assert decide_route("お願い", "本文", llm_intent="qa") == "register"
 
 
+def test_attachment_with_pending_intent_corrected_to_register() -> None:
+    # 添付があるのに LLM が pending を出しても register に倒す
+    assert decide_route("お願い", "本文", llm_intent="pending") == "register"
+
+
 # ── LLM 出力の正規化・堅牢性 ──
 
 
@@ -100,6 +122,7 @@ def test_main_wrapper_shape() -> None:
     assert main("経費の上限は？", "") == {"route": "qa"}
     assert main("お願い", "本文") == {"route": "register"}
     assert main("重複見て", "", "dedup") == {"route": "dedup"}
+    assert main("承認待ちは？", "", "pending") == {"route": "pending"}
 
 
 def test_deterministic() -> None:

@@ -302,6 +302,104 @@ def test_deprecate_pages_collects_errors(client: TestClient) -> None:
 
 
 @respx.mock
+def test_pending_approval_returns_only_draft_pages(client: TestClient) -> None:
+    """承認待ち一覧は status:draft のページだけを返す（一覧APIでなく本文取得で判定）。"""
+    respx.get(f"{GROWI_BASE}/_api/v3/pages/list").mock(
+        return_value=httpx.Response(200, json={
+            "pages": [
+                {"_id": "p-draft", "path": "/manuals/x/draft",
+                 "updatedAt": "2026-06-01T00:00:00.000Z"},
+                {"_id": "p-published", "path": "/manuals/x/pub",
+                 "updatedAt": "2026-06-01T00:00:00.000Z"},
+                {"_id": "p-nostatus", "path": "/manuals/x/none",
+                 "updatedAt": "2026-06-01T00:00:00.000Z"},
+            ],
+            "totalCount": 3, "limit": 100, "offset": 0,
+        })
+    )
+
+    def _per_page(request: httpx.Request) -> httpx.Response:
+        page_id = request.url.params.get("pageId")
+        bodies = {
+            "p-draft": "---\ntitle: 下書き中\nstatus: draft\n---\n本文A",
+            "p-published": "---\ntitle: 公開済み\nstatus: published\n---\n本文B",
+            "p-nostatus": "本文C（frontmatterなし）",
+        }
+        paths = {
+            "p-draft": "/manuals/x/draft",
+            "p-published": "/manuals/x/pub",
+            "p-nostatus": "/manuals/x/none",
+        }
+        return httpx.Response(200, json={"page": {
+            "_id": page_id, "path": paths[page_id],
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "revision": {"_id": f"rev-{page_id}", "body": bodies[page_id]},
+        }})
+
+    respx.get(f"{GROWI_BASE}/_api/v3/page").mock(side_effect=_per_page)
+
+    resp = client.get("/pages/pending-approval", params={"path_prefix": "/manuals/x"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["pages"]) == 1
+    assert body["pages"][0]["id"] == "p-draft"
+    assert body["pages"][0]["title"] == "下書き中"
+    assert body["pages"][0]["metadata"]["status"] == "draft"
+
+
+@respx.mock
+def test_pending_approval_empty_when_no_drafts(client: TestClient) -> None:
+    respx.get(f"{GROWI_BASE}/_api/v3/pages/list").mock(
+        return_value=httpx.Response(200, json={
+            "pages": [{"_id": "p1", "path": "/manuals/x/a",
+                       "updatedAt": "2026-06-01T00:00:00.000Z"}],
+            "totalCount": 1, "limit": 100, "offset": 0,
+        })
+    )
+    respx.get(f"{GROWI_BASE}/_api/v3/page").mock(
+        return_value=httpx.Response(200, json={"page": {
+            "_id": "p1", "path": "/manuals/x/a", "updatedAt": "2026-06-01T00:00:00.000Z",
+            "revision": {"_id": "r1", "body": "---\nstatus: published\n---\n本文"},
+        }})
+    )
+    resp = client.get("/pages/pending-approval")
+    assert resp.status_code == 200
+    assert resp.json()["pages"] == []
+
+
+@respx.mock
+def test_pending_approval_skips_fetch_failures(client: TestClient) -> None:
+    """本文取得に失敗したページは無視して他は返す（全体を止めない）。"""
+    respx.get(f"{GROWI_BASE}/_api/v3/pages/list").mock(
+        return_value=httpx.Response(200, json={
+            "pages": [
+                {"_id": "p-ok", "path": "/manuals/x/ok",
+                 "updatedAt": "2026-06-01T00:00:00.000Z"},
+                {"_id": "p-fail", "path": "/manuals/x/fail",
+                 "updatedAt": "2026-06-01T00:00:00.000Z"},
+            ],
+            "totalCount": 2, "limit": 100, "offset": 0,
+        })
+    )
+
+    def _per_page(request: httpx.Request) -> httpx.Response:
+        page_id = request.url.params.get("pageId")
+        if page_id == "p-fail":
+            return httpx.Response(404, json={"error": "not found"})
+        return httpx.Response(200, json={"page": {
+            "_id": "p-ok", "path": "/manuals/x/ok",
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "revision": {"_id": "r-ok", "body": "---\nstatus: draft\n---\n本文"},
+        }})
+
+    respx.get(f"{GROWI_BASE}/_api/v3/page").mock(side_effect=_per_page)
+    resp = client.get("/pages/pending-approval")
+    assert resp.status_code == 200
+    ids = [p["id"] for p in resp.json()["pages"]]
+    assert ids == ["p-ok"]
+
+
+@respx.mock
 def test_update_page_with_string_revision(client: TestClient) -> None:
     """GROWI が revision を文字列で返す形でも更新できる（バージョン差対応）。"""
     single = {

@@ -3,6 +3,8 @@
 contracts/docstore-openapi.yaml の /pages 系を実装する。
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..deps import get_growi_client
@@ -21,6 +23,7 @@ from ..models import (
     Page,
     PageCreateRequest,
     PageList,
+    PageMeta,
     PageUpdateRequest,
     UpsertRequest,
 )
@@ -170,6 +173,63 @@ async def list_pages(
 
     next_cursor = str(offset + limit) if len(raw_pages) == limit else None
     return PageList(pages=metas, next_cursor=next_cursor)
+
+
+@router.get("/pages/pending-approval", response_model=PageList)
+async def pending_approval(
+    path_prefix: str = Query(default=""),
+    limit: int = Query(default=100, le=500),
+    growi: GrowiClient = Depends(get_growi_client),
+) -> PageList:
+    """承認待ち（status: draft）のページ一覧を返す（HITL 運用の可視化用）。
+
+    `GET /pages?status=` は一覧 API が本文を返さないため best-effort で機能しない
+    （list の frontmatter 抽出は空になりがち。sync_engine と同じ制約）。ここでは
+    候補ページを 1 件ずつ本文取得して実際の status を確認する（sync の full_sync と
+    同じ方式）。件数は path_prefix でのスコープと limit（走査対象の上限）で抑える。
+
+    退役（deprecated）は「対応不要」なので含めない。承認が必要な draft のみ返す。
+    """
+    settings = get_settings()
+    effective_prefix = path_prefix or settings.manual_root_path
+    try:
+        data = await growi.list_pages(path_prefix=effective_prefix, limit=limit, offset=0)
+    except GrowiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    raw_pages = data.get("pages", []) or data.get("docs", [])
+    candidate_ids = [str(p.get("_id", "")) for p in raw_pages if p.get("_id")]
+
+    async def _fetch(page_id: str) -> Page | None:
+        try:
+            full = await growi.get_page(page_id)
+        except GrowiError:
+            return None
+        return growi_to_page(full.get("page", full), settings.growi_base_url)
+
+    # 並行取得（GROWI への同時負荷を抑えるため小さめのセマフォで制限）
+    sem = asyncio.Semaphore(8)
+
+    async def _fetch_limited(page_id: str) -> Page | None:
+        async with sem:
+            return await _fetch(page_id)
+
+    fetched = await asyncio.gather(*(_fetch_limited(pid) for pid in candidate_ids))
+    pending = [p for p in fetched if p and p.metadata.get("status") == "draft"]
+
+    metas = [
+        PageMeta(
+            id=p.id,
+            path=p.path,
+            title=p.title,
+            version=p.version,
+            updated_at=p.updated_at,
+            viewer_url=p.viewer_url,
+            metadata=p.metadata,
+        )
+        for p in pending
+    ]
+    return PageList(pages=metas, next_cursor=None)
 
 
 @router.get("/pages/{page_id}", response_model=Page)

@@ -1,6 +1,6 @@
 # マニュアルアシスタント（完全 bot）— tools/build_dsl.py が生成
-# 質問(qa)/登録(register)/一括取り込み(bulk)/重複整理(dedup) を LLM意図分類 +
-# 決定的サニタイズで 1 入口に統合。設計: docs/unified-chat-design.md。
+# 質問(qa)/登録(register)/一括取り込み(bulk)/重複整理(dedup)/承認待ち確認(pending)
+# を LLM意図分類 + 決定的サニタイズで 1 入口に統合。設計: docs/unified-chat-design.md。
 # **直接編集せず、元 DSL とスクリプトを直して再生成する。**
 #
 # インポート後に環境へ合わせる箇所:
@@ -8,7 +8,8 @@
 #  - q_knowledge_retrieval / similar_search の dataset_ids と Reranker 設定
 #  - environment_variables の DOCSTORE_URL / DOCSTORE_API_KEY
 app:
-  description: マニュアルアシスタント（完全 bot）。質問・登録・一括取り込み・重複整理を 1 つの入口で受け、LLM 意図分類 + 決定的サニタイズで自律的に振り分ける。
+  description: マニュアルアシスタント（完全 bot）。質問・登録・一括取り込み・重複整理・承認待ち確認を 1 つの入口で受け、LLM 意図分類 +
+    決定的サニタイズで自律的に振り分ける。
   icon: 💬
   icon_background: '#D5F5F6'
   mode: advanced-chat
@@ -77,6 +78,8 @@ workflow:
       ・登録/更新: ファイルを添付してください（大きい文書は自動で分割します）
 
       ・重複の整理: 「/manuals/… の重複を整理して」とお伝えください
+
+      ・承認待ち確認: 「承認待ちのページは？」とお伝えください
 
       登録されたページは下書きになり、GROWI で公開すると検索に反映されます。
 
@@ -547,10 +550,28 @@ workflow:
       target: d_scope
       targetHandle: target
       type: custom
+    - id: route_ifelse-case_pending-p_http_pending
+      source: route_ifelse
+      sourceHandle: case_pending
+      target: p_http_pending
+      targetHandle: target
+      type: custom
     - id: route_ifelse-false-route_fallback_answer
       source: route_ifelse
       sourceHandle: 'false'
       target: route_fallback_answer
+      targetHandle: target
+      type: custom
+    - id: p_http_pending-source-p_format
+      source: p_http_pending
+      sourceHandle: source
+      target: p_format
+      targetHandle: target
+      type: custom
+    - id: p_format-source-p_answer
+      source: p_format
+      sourceHandle: source
+      target: p_answer
       targetHandle: target
       type: custom
     nodes:
@@ -2423,7 +2444,7 @@ workflow:
     - data:
         type: llm
         title: 意図分類(ルーターLLM)
-        desc: 意図を qa/register/bulk/dedup に分類。最終決定はルーターCodeが事実で矯正
+        desc: 意図を qa/register/bulk/dedup/pending に分類。最終決定はルーターCodeが事実で矯正
         model:
           completion_params:
             temperature: 0
@@ -2443,7 +2464,9 @@ workflow:
 
             - dedup: 既存ページの重複を整理・確認したい
 
-            迷ったら qa。回答は qa / register / bulk / dedup のいずれか1語のみ。'
+            - pending: 承認待ち（下書き）のページ一覧を知りたい
+
+            迷ったら qa。回答は qa / register / bulk / dedup / pending のいずれか1語のみ。'
         - role: user
           text: '{{#sys.query#}}'
         context:
@@ -2462,52 +2485,57 @@ workflow:
         desc: 添付有無・文字数・キーワード + LLM意図 で qa/register/bulk/dedup を決定
         code_language: python3
         code: "\"\"\"統一チャット（完全 bot）: 決定的サニタイズ付きルーティング。\n\nqa / register / bulk / dedup\
-          \ の 4 機能を 1 入口で振り分ける。ユーザーはどの機能かを\n選ばず、bot が意図を汲んで自律的にルートを決める。設計は\n[docs/unified-chat-design.md]\
-          \ を参照。\n\n方針:\n- **添付の有無・抽出文字数・明示キーワードは決定的に判定**する（書込系フローの\n  誤発火を防ぐ。ここを\
-          \ LLM に委ねると、質問のつもりが書き込まれる等の事故が起きる）。\n- **意図が曖昧な部分（質問か重複整理の依頼か等）は LLM の分類結果（llm_intent）を\n\
-          \  採用**する＝自律的。ただし LLM の結果は必ず「添付という物理的事実」で矯正する\n  （添付が無いのに書込系を選ぶ、を許さない）。\n\
-          \nルート:\n- qa       : 質問応答（RAG）\n- register : 1 ファイル → 1 ページ登録／既存ページへのマージ更新\n\
-          - bulk     : 大きな文書を複数ページに分割取り込み\n- dedup    : Wiki の重複ページを検出して統合を提案（提示まで）\n\
-          \nこのファイルは標準ライブラリのみで完結しており、`main` をそのまま Dify の\nCode ノードに貼り付けられる。\n\"\"\"\
-          \n\n# bulk（分割取り込み）に切り替える抽出テキスト長の閾値（スプリッターのウィンドウ上限）。\nBULK_THRESHOLD_CHARS\
+          \ / pending の 5 機能を 1 入口で振り分ける。ユーザーは\nどの機能かを選ばず、bot が意図を汲んで自律的にルートを決める。設計は\n\
+          [docs/unified-chat-design.md] を参照。\n\n方針:\n- **添付の有無・抽出文字数・明示キーワードは決定的に判定**する（書込系フローの\n\
+          \  誤発火を防ぐ。ここを LLM に委ねると、質問のつもりが書き込まれる等の事故が起きる）。\n- **意図が曖昧な部分（質問か重複整理の依頼か等）は\
+          \ LLM の分類結果（llm_intent）を\n  採用**する＝自律的。ただし LLM の結果は必ず「添付という物理的事実」で矯正する\n\
+          \  （添付が無いのに書込系を選ぶ、を許さない）。\n\nルート:\n- qa       : 質問応答（RAG）\n- register :\
+          \ 1 ファイル → 1 ページ登録／既存ページへのマージ更新\n- bulk     : 大きな文書を複数ページに分割取り込み\n- dedup\
+          \    : Wiki の重複ページを検出して統合を提案（提示まで）\n- pending  : 承認待ち（status: draft）ページの一覧を見せる（読み取り専用。HITL\
+          \ 運用の可視化）\n\nこのファイルは標準ライブラリのみで完結しており、`main` をそのまま Dify の\nCode ノードに貼り付けられる。\n\
+          \"\"\"\n\n# bulk（分割取り込み）に切り替える抽出テキスト長の閾値（スプリッターのウィンドウ上限）。\nBULK_THRESHOLD_CHARS\
           \ = 7000\n\n# 決定的に優先する明示キーワード（正規表現・LLM は使わない）\n_BULK_KEYWORDS = (\"分割\"\
           , \"一括\")\n_REGISTER_KEYWORDS = (\"更新\",)\n_DEDUP_KEYWORDS = (\"重複\", \"\
-          重複排除\")\n\nROUTE_QA = \"qa\"\nROUTE_REGISTER = \"register\"\nROUTE_BULK\
-          \ = \"bulk\"\nROUTE_DEDUP = \"dedup\"\n_VALID_ROUTES = (ROUTE_QA, ROUTE_REGISTER,\
-          \ ROUTE_BULK, ROUTE_DEDUP)\n\n\ndef _coerce_text(text: object) -> str:\n\
-          \    \"\"\"Document Extractor の出力を文字列に正規化する。\n\n    複数ファイル対応（is_array_file）の抽出ノードは\
-          \ text を array[string] で返すため、\n    リストで来たら連結して合計長で判定する。None は空文字。\n    \"\
-          \"\"\n    if isinstance(text, list):\n        return \"\\n\\n\".join(str(t)\
-          \ for t in text if t)\n    if text is None:\n        return \"\"\n    return\
-          \ str(text)\n\n\ndef _clean_intent(llm_intent: object) -> str:\n    \"\"\
-          \"ルーター LLM の出力からルート名を取り出す（前後の語や記号を許容）。\n\n    LLM は \"bulk\" のように 1 語で返す想定だが、\"\
-          route: dedup\" や全角・引用符混じりでも\n    拾えるよう部分一致で正規化する。未知の出力は空文字（＝LLM 判断なし扱い）。\n\
-          \    \"\"\"\n    s = str(llm_intent or \"\").strip().lower()\n    for route\
-          \ in _VALID_ROUTES:\n        if route in s:\n            return route\n\
-          \    return \"\"\n\n\ndef decide_route(\n    query: str,\n    extracted_text:\
+          重複排除\")\n_PENDING_KEYWORDS = (\"承認待ち\", \"下書き一覧\", \"draft一覧\", \"未承認\"\
+          )\n\nROUTE_QA = \"qa\"\nROUTE_REGISTER = \"register\"\nROUTE_BULK = \"bulk\"\
+          \nROUTE_DEDUP = \"dedup\"\nROUTE_PENDING = \"pending\"\n_VALID_ROUTES =\
+          \ (ROUTE_QA, ROUTE_REGISTER, ROUTE_BULK, ROUTE_DEDUP, ROUTE_PENDING)\n\n\
+          \ndef _coerce_text(text: object) -> str:\n    \"\"\"Document Extractor の出力を文字列に正規化する。\n\
+          \n    複数ファイル対応（is_array_file）の抽出ノードは text を array[string] で返すため、\n    リストで来たら連結して合計長で判定する。None\
+          \ は空文字。\n    \"\"\"\n    if isinstance(text, list):\n        return \"\\\
+          n\\n\".join(str(t) for t in text if t)\n    if text is None:\n        return\
+          \ \"\"\n    return str(text)\n\n\ndef _clean_intent(llm_intent: object)\
+          \ -> str:\n    \"\"\"ルーター LLM の出力からルート名を取り出す（前後の語や記号を許容）。\n\n    LLM は \"\
+          bulk\" のように 1 語で返す想定だが、\"route: dedup\" や全角・引用符混じりでも\n    拾えるよう部分一致で正規化する。未知の出力は空文字（＝LLM\
+          \ 判断なし扱い）。\n    \"\"\"\n    s = str(llm_intent or \"\").strip().lower()\n\
+          \    for route in _VALID_ROUTES:\n        if route in s:\n            return\
+          \ route\n    return \"\"\n\n\ndef decide_route(\n    query: str,\n    extracted_text:\
           \ object,\n    llm_intent: object = None,\n    threshold: int = BULK_THRESHOLD_CHARS,\n\
           ) -> str:\n    \"\"\"メッセージ・添付・LLM 意図から最終ルートを決める（決定的サニタイズ）。\n\n    Args:\n\
           \        query: ユーザーのメッセージ（sys.query）。\n        extracted_text: Document\
           \ Extractor の出力（str / list[str] / None）。\n            添付が無い場合は空になる。\n  \
           \      llm_intent: ルーター LLM が分類した意図（qa/register/bulk/dedup）。無くてもよい。\n  \
           \      threshold: bulk に切り替える抽出テキスト長。\n\n    Returns:\n        \"qa\" /\
-          \ \"register\" / \"bulk\" / \"dedup\" のいずれか。\n    \"\"\"\n    text = _coerce_text(extracted_text)\n\
-          \    q = query or \"\"\n    intent = _clean_intent(llm_intent)\n    has_attachment\
-          \ = bool(text.strip())\n\n    if not has_attachment:\n        # 添付なし＝書込材料が無い。register/bulk\
-          \ は物理的にあり得ないので、\n        # LLM が書込系を提案しても qa/dedup に矯正する（誤発火の遮断）。\n    \
-          \    if intent == ROUTE_DEDUP or any(k in q for k in _DEDUP_KEYWORDS):\n\
-          \            return ROUTE_DEDUP\n        return ROUTE_QA\n\n    # 添付あり＝書込系。誤ると影響が大きいので、確実に判定できる材料を優先する。\n\
-          \    if any(k in q for k in _BULK_KEYWORDS):\n        return ROUTE_BULK\n\
-          \    if any(k in q for k in _REGISTER_KEYWORDS):\n        return ROUTE_REGISTER\n\
+          \ \"register\" / \"bulk\" / \"dedup\" / \"pending\" のいずれか。\n    \"\"\"\n\
+          \    text = _coerce_text(extracted_text)\n    q = query or \"\"\n    intent\
+          \ = _clean_intent(llm_intent)\n    has_attachment = bool(text.strip())\n\
+          \n    if not has_attachment:\n        # 添付なし＝書込材料が無い。register/bulk は物理的にあり得ないので、\n\
+          \        # LLM が書込系を提案しても qa/dedup/pending に矯正する（誤発火の遮断）。\n        if intent\
+          \ == ROUTE_PENDING or any(k in q for k in _PENDING_KEYWORDS):\n        \
+          \    return ROUTE_PENDING\n        if intent == ROUTE_DEDUP or any(k in\
+          \ q for k in _DEDUP_KEYWORDS):\n            return ROUTE_DEDUP\n       \
+          \ return ROUTE_QA\n\n    # 添付あり＝書込系。誤ると影響が大きいので、確実に判定できる材料を優先する。\n    if\
+          \ any(k in q for k in _BULK_KEYWORDS):\n        return ROUTE_BULK\n    if\
+          \ any(k in q for k in _REGISTER_KEYWORDS):\n        return ROUTE_REGISTER\n\
           \    if len(text) > threshold:\n        return ROUTE_BULK\n    # 決定打が無ければ\
-          \ LLM の bulk 提案だけ尊重（分割は取り逃すと欠落する）。\n    # dedup/qa は添付ありでは選べない（書込対象があるため\
+          \ LLM の bulk 提案だけ尊重（分割は取り逃すと欠落する）。\n    # dedup/qa/pending は添付ありでは選べない（書込対象があるため\
           \ register に倒す）。\n    if intent == ROUTE_BULK:\n        return ROUTE_BULK\n\
           \    return ROUTE_REGISTER\n\n\ndef main(query: str, extracted_text: object\
           \ = None, llm_intent: object = None) -> dict[str, str]:\n    \"\"\"Dify\
           \ Code ノード用エントリ。\n\n    Args:\n        query: sys.query。\n        extracted_text:\
           \ Document Extractor の出力（添付なしなら空/None）。\n        llm_intent: ルーター LLM の分類結果（無くてもよい）。\n\
           \n    Returns:\n        {\"route\": \"qa\"|\"register\"|\"bulk\"|\"dedup\"\
-          }。後続の IF/ELSE で分岐する。\n    \"\"\"\n    return {\"route\": decide_route(query,\
+          |\"pending\"}。後続の IF/ELSE で分岐する。\n    \"\"\"\n    return {\"route\": decide_route(query,\
           \ extracted_text, llm_intent)}\n"
         outputs:
           route:
@@ -2575,6 +2603,16 @@ workflow:
             variable_selector:
             - router
             - route
+        - case_id: case_pending
+          logical_operator: and
+          conditions:
+          - id: cond_pending
+            comparison_operator: is
+            value: pending
+            varType: string
+            variable_selector:
+            - router
+            - route
       id: route_ifelse
       position:
         x: 960
@@ -2592,9 +2630,74 @@ workflow:
 
           ・重複整理の場合: 「/manuals/… の重複を整理して」のようにお伝えください
 
+          ・承認待ち確認の場合: 「承認待ちのページは？」のようにお伝えください
+
           '
       id: route_fallback_answer
       position:
         x: 1160
         y: 120
+      type: custom
+    - data:
+        type: http-request
+        title: 承認待ち一覧取得
+        desc: Wiki 全体の status:draft ページを取得（アダプタ側で本文取得して判定済み）
+        method: get
+        url: '{{#env.DOCSTORE_URL#}}/pages/pending-approval?limit=500'
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: ''
+          type: none
+        headers: X-API-Key:{{#env.DOCSTORE_API_KEY#}}
+        params: ''
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 60
+          max_write_timeout: 60
+      id: p_http_pending
+      position:
+        x: 1900
+        y: 560
+      type: custom
+    - data:
+        type: code
+        title: 承認待ち一覧を整形
+        desc: 取得結果を読みやすいテキストに整形する（書込は行わない）
+        code_language: python3
+        code: "\nimport json\n\n\ndef main(body: str) -> dict:\n    try:\n       \
+          \ d = json.loads(body) if isinstance(body, str) else (body or {})\n    except\
+          \ Exception:\n        d = {}\n    pages = d.get(\"pages\", []) if isinstance(d,\
+          \ dict) else []\n    if not pages:\n        return {\"text\": \"承認待ち（下書き）のページはありません。\"\
+          }\n    lines = [f\"承認待ち（status: draft）のページが {len(pages)} 件あります。\", \"\"\
+          ]\n    for p in pages:\n        title = p.get(\"title\", \"\")\n       \
+          \ path = p.get(\"path\", \"\")\n        url = p.get(\"viewer_url\", \"\"\
+          )\n        updated = p.get(\"updated_at\", \"\")\n        lines.append(f\"\
+          - {title}（{path}）\")\n        lines.append(f\"  更新: {updated} / {url}\"\
+          )\n    lines.append(\"\")\n    lines.append(\"GROWI で内容を確認し、frontmatter\
+          \ の status を published にすると検索に反映されます。\")\n    return {\"text\": \"\\n\"\
+          .join(lines)}\n"
+        outputs:
+          text:
+            type: string
+        variables:
+        - variable: body
+          value_selector:
+          - p_http_pending
+          - body
+      id: p_format
+      position:
+        x: 2160
+        y: 560
+      type: custom
+    - data:
+        type: answer
+        title: 承認待ち一覧を返す
+        answer: '{{#p_format.text#}}'
+        variables: []
+      id: p_answer
+      position:
+        x: 2420
+        y: 560
       type: custom

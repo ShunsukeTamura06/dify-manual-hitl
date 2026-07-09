@@ -1,7 +1,7 @@
 """統一チャット（完全 bot）: 決定的サニタイズ付きルーティング。
 
-qa / register / bulk / dedup の 4 機能を 1 入口で振り分ける。ユーザーはどの機能かを
-選ばず、bot が意図を汲んで自律的にルートを決める。設計は
+qa / register / bulk / dedup / pending の 5 機能を 1 入口で振り分ける。ユーザーは
+どの機能かを選ばず、bot が意図を汲んで自律的にルートを決める。設計は
 [docs/unified-chat-design.md] を参照。
 
 方針:
@@ -16,6 +16,7 @@ qa / register / bulk / dedup の 4 機能を 1 入口で振り分ける。ユー
 - register : 1 ファイル → 1 ページ登録／既存ページへのマージ更新
 - bulk     : 大きな文書を複数ページに分割取り込み
 - dedup    : Wiki の重複ページを検出して統合を提案（提示まで）
+- pending  : 承認待ち（status: draft）ページの一覧を見せる（読み取り専用。HITL 運用の可視化）
 
 このファイルは標準ライブラリのみで完結しており、`main` をそのまま Dify の
 Code ノードに貼り付けられる。
@@ -28,12 +29,14 @@ BULK_THRESHOLD_CHARS = 7000
 _BULK_KEYWORDS = ("分割", "一括")
 _REGISTER_KEYWORDS = ("更新",)
 _DEDUP_KEYWORDS = ("重複", "重複排除")
+_PENDING_KEYWORDS = ("承認待ち", "下書き一覧", "draft一覧", "未承認")
 
 ROUTE_QA = "qa"
 ROUTE_REGISTER = "register"
 ROUTE_BULK = "bulk"
 ROUTE_DEDUP = "dedup"
-_VALID_ROUTES = (ROUTE_QA, ROUTE_REGISTER, ROUTE_BULK, ROUTE_DEDUP)
+ROUTE_PENDING = "pending"
+_VALID_ROUTES = (ROUTE_QA, ROUTE_REGISTER, ROUTE_BULK, ROUTE_DEDUP, ROUTE_PENDING)
 
 
 def _coerce_text(text: object) -> str:
@@ -78,7 +81,7 @@ def decide_route(
         threshold: bulk に切り替える抽出テキスト長。
 
     Returns:
-        "qa" / "register" / "bulk" / "dedup" のいずれか。
+        "qa" / "register" / "bulk" / "dedup" / "pending" のいずれか。
     """
     text = _coerce_text(extracted_text)
     q = query or ""
@@ -87,7 +90,9 @@ def decide_route(
 
     if not has_attachment:
         # 添付なし＝書込材料が無い。register/bulk は物理的にあり得ないので、
-        # LLM が書込系を提案しても qa/dedup に矯正する（誤発火の遮断）。
+        # LLM が書込系を提案しても qa/dedup/pending に矯正する（誤発火の遮断）。
+        if intent == ROUTE_PENDING or any(k in q for k in _PENDING_KEYWORDS):
+            return ROUTE_PENDING
         if intent == ROUTE_DEDUP or any(k in q for k in _DEDUP_KEYWORDS):
             return ROUTE_DEDUP
         return ROUTE_QA
@@ -100,7 +105,7 @@ def decide_route(
     if len(text) > threshold:
         return ROUTE_BULK
     # 決定打が無ければ LLM の bulk 提案だけ尊重（分割は取り逃すと欠落する）。
-    # dedup/qa は添付ありでは選べない（書込対象があるため register に倒す）。
+    # dedup/qa/pending は添付ありでは選べない（書込対象があるため register に倒す）。
     if intent == ROUTE_BULK:
         return ROUTE_BULK
     return ROUTE_REGISTER
@@ -115,6 +120,6 @@ def main(query: str, extracted_text: object = None, llm_intent: object = None) -
         llm_intent: ルーター LLM の分類結果（無くてもよい）。
 
     Returns:
-        {"route": "qa"|"register"|"bulk"|"dedup"}。後続の IF/ELSE で分岐する。
+        {"route": "qa"|"register"|"bulk"|"dedup"|"pending"}。後続の IF/ELSE で分岐する。
     """
     return {"route": decide_route(query, extracted_text, llm_intent)}

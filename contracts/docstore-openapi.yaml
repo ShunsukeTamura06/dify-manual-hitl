@@ -155,6 +155,30 @@ paths:
         '409':
           description: パス重複（新規作成時）
 
+  /pages/pending-approval:
+    get:
+      tags: [pages]
+      summary: 承認待ち（status: draft）のページ一覧（HITL 運用の可視化用）
+      description: |
+        `GET /pages?status=` は一覧 API が本文を返さないため best-effort で機能しない
+        （list の frontmatter 抽出は空になりがち）。本エンドポイントは候補ページを
+        1 件ずつ本文取得して実際の status を確認し、draft のみ返す。
+        退役（deprecated）は対応不要なので含めない。
+      parameters:
+        - name: path_prefix
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 500 }
+          description: 走査対象（一覧取得の上限）。返る draft 件数の上限ではない。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageList' }
+
   /pages/deprecate:
     post:
       tags: [pages]

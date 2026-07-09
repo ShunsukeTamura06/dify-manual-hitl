@@ -12,7 +12,9 @@
 - 登録 Bot をベースに、その start / doc_extractor を共有ノードとして使う。
 - QA Bot は q_、一括取り込み Bot は b_、重複排除 Bot は d_ 接頭辞で名前空間化。
 - doc_extractor の後ろに ルーターLLM(意図分類) → ルーター(Code・決定的サニタイズ)
-  → IF/ELSE を挿入し、qa / register / bulk / dedup の 4 分岐にする。
+  → IF/ELSE を挿入し、qa / register / bulk / dedup / pending の 5 分岐にする。
+- pending 分岐（承認待ち一覧・読み取り専用）は本スクリプトが直接組み立てる
+  （元 DSL に対応する Bot が無いため。アダプタの GET /pages/pending-approval を叩くだけ）。
 - 各フローのノード・プロンプト・接続は変更しない（実機検証済みの資産を保全）。
 """
 
@@ -142,7 +144,7 @@ def build() -> dict:
         "data": {
             "type": "llm",
             "title": "意図分類(ルーターLLM)",
-            "desc": "意図を qa/register/bulk/dedup に分類。最終決定はルーターCodeが事実で矯正",
+            "desc": "意図を qa/register/bulk/dedup/pending に分類。最終決定はルーターCodeが事実で矯正",
             "model": {
                 **copy.deepcopy(reg_llm_model),
                 "completion_params": {"temperature": 0, "max_tokens": 20},
@@ -156,7 +158,8 @@ def build() -> dict:
                         "- register: 資料（ファイル）を登録・更新したい\n"
                         "- bulk: 大きな資料を分割して一括取り込みしたい\n"
                         "- dedup: 既存ページの重複を整理・確認したい\n"
-                        "迷ったら qa。回答は qa / register / bulk / dedup のいずれか1語のみ。"
+                        "- pending: 承認待ち（下書き）のページ一覧を知りたい\n"
+                        "迷ったら qa。回答は qa / register / bulk / dedup / pending のいずれか1語のみ。"
                     ),
                 },
                 {"role": "user", "text": "{{#sys.query#}}"},
@@ -248,6 +251,19 @@ def build() -> dict:
                         }
                     ],
                 },
+                {
+                    "case_id": "case_pending",
+                    "logical_operator": "and",
+                    "conditions": [
+                        {
+                            "id": "cond_pending",
+                            "comparison_operator": "is",
+                            "value": "pending",
+                            "varType": "string",
+                            "variable_selector": ["router", "route"],
+                        }
+                    ],
+                },
             ],
         },
         "id": "route_ifelse",
@@ -264,10 +280,80 @@ def build() -> dict:
                 "・質問の場合: そのままメッセージでお送りください\n"
                 "・登録の場合: ファイルを添付してください\n"
                 "・重複整理の場合: 「/manuals/… の重複を整理して」のようにお伝えください\n"
+                "・承認待ち確認の場合: 「承認待ちのページは？」のようにお伝えください\n"
             ),
         },
         "id": "route_fallback_answer",
         "position": {"x": 1160, "y": 120},
+        "type": "custom",
+    }
+
+    # ── pending 分岐（承認待ち一覧。読み取り専用・HITL 運用の可視化）──
+    # アダプタの GET /pages/pending-approval を叩いて整形するだけ。書込は一切しない。
+    p_http = {
+        "data": {
+            "type": "http-request",
+            "title": "承認待ち一覧取得",
+            "desc": "Wiki 全体の status:draft ページを取得（アダプタ側で本文取得して判定済み）",
+            "method": "get",
+            "url": "{{#env.DOCSTORE_URL#}}/pages/pending-approval?limit=500",
+            "authorization": {"config": None, "type": "no-auth"},
+            "body": {"data": "", "type": "none"},
+            "headers": "X-API-Key:{{#env.DOCSTORE_API_KEY#}}",
+            "params": "",
+            "timeout": {"max_connect_timeout": 10, "max_read_timeout": 60, "max_write_timeout": 60},
+        },
+        "id": "p_http_pending",
+        "position": {"x": 1900, "y": 560},
+        "type": "custom",
+    }
+    p_format_code = '''
+import json
+
+
+def main(body: str) -> dict:
+    try:
+        d = json.loads(body) if isinstance(body, str) else (body or {})
+    except Exception:
+        d = {}
+    pages = d.get("pages", []) if isinstance(d, dict) else []
+    if not pages:
+        return {"text": "承認待ち（下書き）のページはありません。"}
+    lines = [f"承認待ち（status: draft）のページが {len(pages)} 件あります。", ""]
+    for p in pages:
+        title = p.get("title", "")
+        path = p.get("path", "")
+        url = p.get("viewer_url", "")
+        updated = p.get("updated_at", "")
+        lines.append(f"- {title}（{path}）")
+        lines.append(f"  更新: {updated} / {url}")
+    lines.append("")
+    lines.append("GROWI で内容を確認し、frontmatter の status を published にすると検索に反映されます。")
+    return {"text": "\\n".join(lines)}
+'''
+    p_format = {
+        "data": {
+            "type": "code",
+            "title": "承認待ち一覧を整形",
+            "desc": "取得結果を読みやすいテキストに整形する（書込は行わない）",
+            "code_language": "python3",
+            "code": p_format_code,
+            "outputs": {"text": {"type": "string"}},
+            "variables": [{"variable": "body", "value_selector": ["p_http_pending", "body"]}],
+        },
+        "id": "p_format",
+        "position": {"x": 2160, "y": 560},
+        "type": "custom",
+    }
+    p_answer = {
+        "data": {
+            "type": "answer",
+            "title": "承認待ち一覧を返す",
+            "answer": "{{#p_format.text#}}",
+            "variables": [],
+        },
+        "id": "p_answer",
+        "position": {"x": 2420, "y": 560},
         "type": "custom",
     }
 
@@ -281,7 +367,15 @@ def build() -> dict:
         + qa_nodes
         + bulk_nodes
         + dedup_nodes
-        + [router_llm_node, router_node, ifelse_node, fallback_node]
+        + [
+            router_llm_node,
+            router_node,
+            ifelse_node,
+            fallback_node,
+            p_http,
+            p_format,
+            p_answer,
+        ]
     )
     edges = (
         reg_edges
@@ -296,7 +390,10 @@ def build() -> dict:
             _edge("route_ifelse", "llm1", handle="case_register"),
             _edge("route_ifelse", "b_split_windows", handle="case_bulk"),
             _edge("route_ifelse", "d_scope", handle="case_dedup"),
+            _edge("route_ifelse", "p_http_pending", handle="case_pending"),
             _edge("route_ifelse", "route_fallback_answer", handle="false"),
+            _edge("p_http_pending", "p_format"),
+            _edge("p_format", "p_answer"),
         ]
     )
     # エッジ ID の重複を避ける（各 Bot 由来の e1 等が衝突しうる）
@@ -310,6 +407,7 @@ def build() -> dict:
         "・質問: そのまま聞いてください（出典付きで回答します）\n"
         "・登録/更新: ファイルを添付してください（大きい文書は自動で分割します）\n"
         "・重複の整理: 「/manuals/… の重複を整理して」とお伝えください\n"
+        "・承認待ち確認: 「承認待ちのページは？」とお伝えください\n"
         "登録されたページは下書きになり、GROWI で公開すると検索に反映されます。\n"
     )
     features["retriever_resource"] = {"enabled": True}
@@ -317,8 +415,9 @@ def build() -> dict:
     return {
         "app": {
             "description": (
-                "マニュアルアシスタント（完全 bot）。質問・登録・一括取り込み・重複整理を"
-                " 1 つの入口で受け、LLM 意図分類 + 決定的サニタイズで自律的に振り分ける。"
+                "マニュアルアシスタント（完全 bot）。質問・登録・一括取り込み・重複整理・"
+                "承認待ち確認を 1 つの入口で受け、LLM 意図分類 + 決定的サニタイズで"
+                "自律的に振り分ける。"
             ),
             "icon": "💬",
             "icon_background": "#D5F5F6",
@@ -388,8 +487,8 @@ def main() -> None:
         raise SystemExit(1)
     header = (
         "# マニュアルアシスタント（完全 bot）— tools/build_dsl.py が生成\n"
-        "# 質問(qa)/登録(register)/一括取り込み(bulk)/重複整理(dedup) を LLM意図分類 +\n"
-        "# 決定的サニタイズで 1 入口に統合。設計: docs/unified-chat-design.md。\n"
+        "# 質問(qa)/登録(register)/一括取り込み(bulk)/重複整理(dedup)/承認待ち確認(pending)\n"
+        "# を LLM意図分類 + 決定的サニタイズで 1 入口に統合。設計: docs/unified-chat-design.md。\n"
         "# **直接編集せず、元 DSL とスクリプトを直して再生成する。**\n"
         "#\n"
         "# インポート後に環境へ合わせる箇所:\n"
