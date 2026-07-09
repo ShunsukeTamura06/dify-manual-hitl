@@ -77,6 +77,34 @@ services:
       retries: 3
       start_period: 10s
 
+  # ── 定期 full 同期（取りこぼしの保険。Webhook が無い/失敗しても最終的に整合する）──
+  # sync 本体はスケジューラを持たない（ステートレス原則）。トリガーは外部のこのコンテナが担う。
+  # 間隔は SYNC_CRON_INTERVAL 秒（既定 900=15分）。SYNC_API_KEY 設定時は X-API-Key を送る。
+  sync-cron:
+    image: curlimages/curl:8.11.0
+    environment:
+      - SYNC_CRON_INTERVAL=${SYNC_CRON_INTERVAL:-900}
+      - SYNC_API_KEY=${SYNC_API_KEY:-}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "定期同期を開始（間隔 ${SYNC_CRON_INTERVAL:-900}秒）"
+        sleep 20
+        while true; do
+          curl -sS -m 300 -X POST "http://sync:8002/sync" \
+            -H "Content-Type: application/json" \
+            ${SYNC_API_KEY:+-H "X-API-Key: ${SYNC_API_KEY}"} \
+            -d '{"mode":"full"}' -o /dev/null -w "定期同期 http=%{http_code}\n" || true
+          sleep "${SYNC_CRON_INTERVAL:-900}"
+        done
+    networks:
+      - manual-net
+    depends_on:
+      sync:
+        condition: service_started
+    restart: unless-stopped
+
 networks:
   manual-net:
     driver: bridge

@@ -39,6 +39,7 @@ Dify Document 名に `{page_id}::{title}` の形式で page_id を埋め込み�
 | メソッド | パス | 内容 |
 |----------|------|------|
 | POST | `/sync` | 同期トリガー（`{"mode": "full"}` 等） |
+| POST | `/webhook/growi` | Wiki 更新通知を受けて自動同期（`?token=` で保護可） |
 | GET | `/health` | DocStore と Dify への到達確認 |
 | GET | `/info` | サービス情報 |
 
@@ -85,16 +86,34 @@ uv run ruff check .
 uv run mypy app
 ```
 
-## cron での定期実行（例）
+## 自動同期（反映ループを閉じる）
 
-このサービス自身はスケジューラを持たない（単一責任）。外部 cron から叩く:
+このサービス自身はスケジューラを持たない（単一責任・ステートレス）。トリガーは
+外部から与える。2 系統を併用すると「編集 → 即時反映」＋「取りこぼしゼロ」になる。
 
+### 1. 定期同期（取りこぼしの保険）— `sync-cron` コンテナ
+
+`services/docker-compose.yml` に同梱。既定 15 分ごとに full 同期を叩く。
+間隔は `SYNC_CRON_INTERVAL`（秒）で調整:
+
+```bash
+SYNC_CRON_INTERVAL=300 docker compose up -d sync-cron   # 5分ごと
+```
+
+自前 cron でも可:
 ```cron
-# 毎日 2:00 に差分同期（since は前回からの差分を運用側で管理 or full で代替）
 0 2 * * * curl -sX POST http://localhost:8002/sync -H 'Content-Type: application/json' -d '{"mode":"full"}'
 ```
 
-将来 webhook 受付やスケジュール内蔵が必要になれば別途検討（Phase 1b 後半）。
+### 2. Webhook（即時反映）— GROWI 更新通知
+
+GROWI 管理画面 → 通知設定 → Webhook で、ページ更新イベントの送信先に
+`http://<sync>:8002/webhook/growi?token=<GROWI_WEBHOOK_TOKEN>` を設定する。
+編集/公開のたびに full 同期が走り、数秒で Dify に反映される。
+
+- `GROWI_WEBHOOK_TOKEN` を設定するとその `?token=` 一致時のみ受理（未設定なら誰でも可）。
+- 同期実行中に来た通知は二重起動せずスキップ（`sync-cron` が最終的に整合させる）。
+- Webhook が使えない Wiki（フォルダ等）では定期同期のみで運用する。
 
 ## 既知の制約
 

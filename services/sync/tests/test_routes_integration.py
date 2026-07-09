@@ -149,6 +149,62 @@ def test_sync_diff_requires_since(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
+@respx.mock
+def test_webhook_triggers_full_sync(client: TestClient) -> None:
+    """GROWI webhook を受けると full 同期が走る（反映ループの自動化）。"""
+    respx.get(f"{DOCSTORE}/pages").mock(
+        return_value=httpx.Response(200, json={
+            "pages": [{"id": "p1", "path": "/m/a", "title": "経費", "version": "v1",
+                       "updated_at": "2026-05-29T10:00:00+00:00",
+                       "viewer_url": f"{DOCSTORE}/m/a", "metadata": {"status": "published"}}],
+            "next_cursor": None,
+        })
+    )
+    respx.get(_dify_docs_url()).mock(
+        return_value=httpx.Response(200, json={"data": [], "has_more": False})
+    )
+    respx.get(f"{DOCSTORE}/pages/p1").mock(
+        return_value=httpx.Response(200, json={
+            "id": "p1", "path": "/m/a", "title": "経費", "content": "本文",
+            "version": "v1", "updated_at": "2026-05-29T10:00:00+00:00",
+            "viewer_url": f"{DOCSTORE}/m/a", "metadata": {"status": "published"}})
+    )
+    create_route = respx.post(f"{_dify_docs_url()[:-1]}/create-by-text").mock(
+        return_value=httpx.Response(200, json={"document": {"id": "d-new"}})
+    )
+    resp = client.post("/webhook/growi")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["triggered"] is True
+    assert body["result"]["created"] == 1
+    assert create_route.called
+
+
+def test_webhook_token_required_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GROWI_WEBHOOK_TOKEN 設定時は ?token= 一致が必要。"""
+    monkeypatch.setenv("GROWI_WEBHOOK_TOKEN", "hook-secret")
+    get_settings.cache_clear()
+    from app.main import create_app
+
+    hook_client = TestClient(create_app())
+    assert hook_client.post("/webhook/growi").status_code == 401
+    assert hook_client.post("/webhook/growi?token=wrong").status_code == 401
+
+
+def test_webhook_is_auth_exempt_from_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SYNC_API_KEY 設定時も webhook は X-API-Key 免除（独自 token で守る）。"""
+    monkeypatch.setenv("SYNC_API_KEY", "sync-secret")
+    monkeypatch.setenv("GROWI_WEBHOOK_TOKEN", "hook-secret")
+    get_settings.cache_clear()
+    from app.main import create_app
+
+    hook_client = TestClient(create_app())
+    # X-API-Key 無しでも token が正しければ 401(api key) にはならず token 検証に進む
+    resp = hook_client.post("/webhook/growi?token=wrong")
+    assert resp.status_code == 401
+    assert "token" in resp.json()["detail"]
+
+
 def test_api_key_required_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     """SYNC_API_KEY 設定時は X-API-Key を要求する（同期トリガーの保護）。"""
     monkeypatch.setenv("SYNC_API_KEY", "sync-secret")

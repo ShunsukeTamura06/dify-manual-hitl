@@ -14,12 +14,14 @@ DocStore Adapter → Dify Knowledge への同期を提供する。
 - GET  /info    : サービス情報
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from .dify_client import DifyError, DifyKnowledgeClient
@@ -29,8 +31,11 @@ from .models import HealthStatus, SyncRequest, SyncResult
 from .settings import get_settings
 from .sync_engine import SyncEngine
 
-# 認証を免除するパス（死活監視はキーなしで叩けるようにする）
-_AUTH_EXEMPT_PATHS = frozenset({"/health"})
+# 認証を免除するパス（死活監視・Webhook は X-API-Key を使わず独自トークンで守る）
+_AUTH_EXEMPT_PATHS = frozenset({"/health", "/webhook/growi"})
+
+# 同期の直列化ロック。webhook と cron が重なっても Dify を同時に書き換えない。
+_sync_lock = asyncio.Lock()
 
 
 def _make_docstore() -> DocStoreClient:
@@ -92,29 +97,58 @@ def create_app() -> FastAPI:
             )
         return await call_next(request)
 
+    async def _run_sync(req: SyncRequest) -> SyncResult:
+        """1 回の同期を直列に実行する（webhook / cron / 手動で共用）。"""
+        async with _sync_lock:
+            docstore = _make_docstore()
+            dify = _make_dify()
+            try:
+                engine = SyncEngine(
+                    docstore,
+                    dify,
+                    embed_header=settings.embed_source_header,
+                    exclude_statuses=settings.exclude_statuses,
+                )
+                if req.mode == "full":
+                    return await engine.full_sync(dry_run=req.dry_run)
+                assert req.since is not None
+                return await engine.diff_sync(req.since, dry_run=req.dry_run)
+            finally:
+                await docstore.close()
+                await dify.close()
+
     @app.post("/sync", response_model=SyncResult)
     async def sync(req: SyncRequest) -> SyncResult:
         if req.mode not in ("full", "diff"):
             raise HTTPException(status_code=400, detail="mode は full か diff")
         if req.mode == "diff" and req.since is None:
             raise HTTPException(status_code=400, detail="diff モードは since 必須")
+        return await _run_sync(req)
 
-        docstore = _make_docstore()
-        dify = _make_dify()
-        try:
-            engine = SyncEngine(
-                docstore,
-                dify,
-                embed_header=settings.embed_source_header,
-                exclude_statuses=settings.exclude_statuses,
-            )
-            if req.mode == "full":
-                return await engine.full_sync(dry_run=req.dry_run)
-            assert req.since is not None
-            return await engine.diff_sync(req.since, dry_run=req.dry_run)
-        finally:
-            await docstore.close()
-            await dify.close()
+    @app.post("/webhook/growi")
+    async def webhook_growi(token: str = Query(default="")) -> dict[str, Any]:
+        """GROWI 等の Wiki 更新通知を受けて自動同期する（反映ループを閉じる）。
+
+        GROWI 管理画面の Webhook で本 URL を設定する。ページの作成/更新/削除で叩かれ、
+        設定モード（既定 full）で同期する。GROWI の Webhook は X-API-Key を付けにくいため、
+        `?token=` による独自トークンで守る（GROWI_WEBHOOK_TOKEN 設定時のみ検証）。
+
+        既に同期実行中なら二重起動せず skipped を返す（cron/次回で追いつく）。
+        """
+        if settings.growi_webhook_token and token != settings.growi_webhook_token:
+            raise HTTPException(status_code=401, detail="webhook token 不一致")
+        if _sync_lock.locked():
+            return {"triggered": False, "reason": "同期実行中のためスキップ"}
+        mode = settings.webhook_sync_mode
+        if mode not in ("full", "diff"):
+            mode = "full"
+        req = SyncRequest(mode=mode, since=datetime.now(UTC) if mode == "diff" else None)
+        result = await _run_sync(req)
+        logger.info(
+            "webhook 同期完了: created=%d updated=%d deleted=%d skipped=%d",
+            result.created, result.updated, result.deleted, result.skipped,
+        )
+        return {"triggered": True, "result": result.model_dump(mode="json")}
 
     @app.get("/health", response_model=HealthStatus)
     async def health() -> HealthStatus:

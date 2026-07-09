@@ -45,10 +45,21 @@ class Settings(BaseSettings):
             s.strip().lower() for s in self.sync_exclude_statuses.split(",") if s.strip()
         )
 
+    # Webhook トリガー（Wiki 側の更新通知で自動同期する。GROWI 等）
+    growi_webhook_token: str = Field(
+        default="",
+        description="設定すると /webhook/growi は ?token= がこの値と一致する場合のみ受理。"
+        "空なら誰でも叩ける（ネットワーク隔離前提のローカル用）",
+    )
+    webhook_sync_mode: str = Field(
+        default="full",
+        description="Webhook 受信時の同期モード。full が確実（since を持たないため既定 full）",
+    )
+
     # サービス自身
     sync_api_key: str = Field(
         default="",
-        description="設定すると全エンドポイント（/health 除く）で X-API-Key ヘッダを要求。"
+        description="設定すると全エンドポイント（/health, /webhook/* 除く）で X-API-Key を要求。"
         "空なら認証なし（ローカル開発用）",
     )
     port: int = Field(default=8002)
