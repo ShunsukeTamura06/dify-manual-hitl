@@ -38,8 +38,14 @@ workflow:
         sourceHandle: source
         targetHandle: target
         type: custom
-      - id: retrieval-to-llm
+      - id: retrieval-to-staleness
         source: knowledge_retrieval
+        target: staleness
+        sourceHandle: source
+        targetHandle: target
+        type: custom
+      - id: staleness-to-llm
+        source: staleness
         target: llm
         sourceHandle: source
         targetHandle: target
@@ -81,6 +87,57 @@ workflow:
               model: "REPLACE_WITH_RERANKER_MODEL"         # 例: BAAI/bge-reranker-v2-m3
         position: {x: 380, y: 282}
 
+      # ── 古さ判定ノード（読込時の透明性。architecture.md の設計） ──
+      # 検索結果each chunk の本文冒頭には sync が埋め込んだ「最終更新:{ISO日時}」
+      # ヘッダ（services/sync/app/naming.py build_source_header）が既に入っている。
+      # 経過日数の計算は決定的に Code で行い、古い場合は注記をチャンクへ追記して
+      # LLM に渡す（日付計算を LLM の不確かな推論に委ねない）。
+      - id: staleness
+        type: custom
+        data:
+          type: code
+          title: 古さ判定
+          code_language: python3
+          code: |
+            import re
+            from datetime import datetime, timezone
+
+            # 「最終更新から何日経過したら注記するか」。半年を既定とする。
+            STALENESS_DAYS = 180
+            _STALE_RE = re.compile(r"最終更新:(\S+)")
+
+
+            def main(items: list) -> dict:
+                now = datetime.now(timezone.utc)
+                chunks = []
+                for r in (items or []):
+                    content = str(r.get("content", ""))
+                    note = ""
+                    m = _STALE_RE.search(content)
+                    if m:
+                        raw = m.group(1).rstrip("/")
+                        try:
+                            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            days = (now - dt).days
+                            if days >= STALENESS_DAYS:
+                                note = (
+                                    f"\n> ⚠️ この情報は最終更新から{days}日以上経過しています。"
+                                    "最新か確認してください。"
+                                )
+                        except ValueError:
+                            pass
+                    chunks.append(content + note)
+                return {"context": "\n\n---\n\n".join(chunks)}
+          outputs:
+            context:
+              type: string
+          variables:
+            - variable: items
+              value_selector: [knowledge_retrieval, result]
+        position: {x: 530, y: 282}
+
       # ── LLM (Claude) ノード ──
       - id: llm
         type: custom
@@ -104,28 +161,34 @@ workflow:
                 2. 該当情報が無い・不十分な場合は、明確に「該当する情報がマニュアルに見当たりません」と回答する。憶測で補わない。
                 3. 回答には必ず**出典**を含める。出典はマニュアル名と該当箇所を明記する。
                 4. 複数のコンテキストで矛盾する記述がある場合、矛盾を隠さず両方提示し、どちらが新しいか/正しいかを確認するよう促す。
-                5. 古い情報の可能性がある場合は、その旨を注記する。
+                5. コンテキストの各チャンクには「最終更新:{日時}」が付いている。回答の根拠にした
+                   チャンクの最終更新日を出典に必ず併記する（読込時の透明性。日付そのものを
+                   加工・推測しない。書かれている値をそのまま使う）。
+                6. コンテキストに「⚠️ この情報は最終更新から○日以上経過しています」という注記が
+                   付いているチャンクを使った場合は、注意・補足でその旨をそのまま伝え、
+                   「最新か原典（出典URL）で確認してください」と促す。日数の判定は既に済んでいる
+                   ので、自分で経過日数を計算・推測しない。
 
                 # 出力形式
                 ## 回答
                 （簡潔に。長くても5-7文程度。手順なら番号付き）
 
                 ## 出典
-                - {マニュアル名}: {該当箇所の要約}
+                - {マニュアル名}（最終更新: {日時}）: {該当箇所の要約}
                 - ...
 
                 ## 注意・補足
-                （矛盾、不確実性、確認が必要な点があれば）
+                （矛盾、古さの注記、不確実性、確認が必要な点があれば）
             - role: user
               text: |
                 # コンテキスト
-                {{#context#}}
+                {{#staleness.context#}}
 
                 # 質問
                 {{#sys.query#}}
           context:
-            enabled: true
-            variable_selector: [knowledge_retrieval, result]
+            enabled: false
+            variable_selector: []
           vision:
             enabled: false
         position: {x: 680, y: 282}

@@ -198,8 +198,14 @@ workflow:
       target: answer
       targetHandle: target
       type: custom
-    - id: q_knowledge_retrieval-source-q_llm
+    - id: q_knowledge_retrieval-source-q_staleness
       source: q_knowledge_retrieval
+      target: q_staleness
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+    - id: q_staleness-source-q_llm
+      source: q_staleness
       target: q_llm
       sourceHandle: source
       targetHandle: target
@@ -1070,6 +1076,37 @@ workflow:
       position:
         x: 380
         y: -118
+    - id: q_staleness
+      type: custom
+      data:
+        type: code
+        title: 古さ判定
+        code_language: python3
+        code: "import re\nfrom datetime import datetime, timezone\n\n# 「最終更新から何日経過したら注記するか」。半年を既定とする。\n\
+          STALENESS_DAYS = 180\n_STALE_RE = re.compile(r\"最終更新:(\\S+)\")\n\n\ndef\
+          \ main(items: list) -> dict:\n    now = datetime.now(timezone.utc)\n   \
+          \ chunks = []\n    for r in (items or []):\n        content = str(r.get(\"\
+          content\", \"\"))\n        note = \"\"\n        m = _STALE_RE.search(content)\n\
+          \        if m:\n            raw = m.group(1).rstrip(\"/\")\n           \
+          \ try:\n                dt = datetime.fromisoformat(raw.replace(\"Z\", \"\
+          +00:00\"))\n                if dt.tzinfo is None:\n                    dt\
+          \ = dt.replace(tzinfo=timezone.utc)\n                days = (now - dt).days\n\
+          \                if days >= STALENESS_DAYS:\n                    note =\
+          \ (\n                        f\"\\n> ⚠️ この情報は最終更新から{days}日以上経過しています。\"\n\
+          \                        \"最新か確認してください。\"\n                    )\n     \
+          \       except ValueError:\n                pass\n        chunks.append(content\
+          \ + note)\n    return {\"context\": \"\\n\\n---\\n\\n\".join(chunks)}\n"
+        outputs:
+          context:
+            type: string
+        variables:
+        - variable: items
+          value_selector:
+          - q_knowledge_retrieval
+          - result
+      position:
+        x: 530
+        y: -118
     - id: q_llm
       type: custom
       data:
@@ -1084,45 +1121,18 @@ workflow:
             temperature: 0.2
         prompt_template:
         - role: system
-          text: 'あなたは社内マニュアルに基づいて質問に答えるアシスタントです。
-
-
-            # 厳守ルール
-
-            1. 提供された「コンテキスト」の情報のみを使って回答する。コンテキストに無い情報は推測しない。
-
-            2. 該当情報が無い・不十分な場合は、明確に「該当する情報がマニュアルに見当たりません」と回答する。憶測で補わない。
-
-            3. 回答には必ず**出典**を含める。出典はマニュアル名と該当箇所を明記する。
-
-            4. 複数のコンテキストで矛盾する記述がある場合、矛盾を隠さず両方提示し、どちらが新しいか/正しいかを確認するよう促す。
-
-            5. 古い情報の可能性がある場合は、その旨を注記する。
-
-
-            # 出力形式
-
-            ## 回答
-
-            （簡潔に。長くても5-7文程度。手順なら番号付き）
-
-
-            ## 出典
-
-            - {マニュアル名}: {該当箇所の要約}
-
-            - ...
-
-
-            ## 注意・補足
-
-            （矛盾、不確実性、確認が必要な点があれば）
-
-            '
+          text: "あなたは社内マニュアルに基づいて質問に答えるアシスタントです。\n\n# 厳守ルール\n1. 提供された「コンテキスト」の情報のみを使って回答する。コンテキストに無い情報は推測しない。\n\
+            2. 該当情報が無い・不十分な場合は、明確に「該当する情報がマニュアルに見当たりません」と回答する。憶測で補わない。\n3. 回答には必ず**出典**を含める。出典はマニュアル名と該当箇所を明記する。\n\
+            4. 複数のコンテキストで矛盾する記述がある場合、矛盾を隠さず両方提示し、どちらが新しいか/正しいかを確認するよう促す。\n5. コンテキストの各チャンクには「最終更新:{日時}」が付いている。回答の根拠にした\n\
+            \   チャンクの最終更新日を出典に必ず併記する（読込時の透明性。日付そのものを\n   加工・推測しない。書かれている値をそのまま使う）。\n\
+            6. コンテキストに「⚠️ この情報は最終更新から○日以上経過しています」という注記が\n   付いているチャンクを使った場合は、注意・補足でその旨をそのまま伝え、\n\
+            \   「最新か原典（出典URL）で確認してください」と促す。日数の判定は既に済んでいる\n   ので、自分で経過日数を計算・推測しない。\n\
+            \n# 出力形式\n## 回答\n（簡潔に。長くても5-7文程度。手順なら番号付き）\n\n## 出典\n- {マニュアル名}（最終更新:\
+            \ {日時}）: {該当箇所の要約}\n- ...\n\n## 注意・補足\n（矛盾、古さの注記、不確実性、確認が必要な点があれば）\n"
         - role: user
           text: '# コンテキスト
 
-            {{#context#}}
+            {{#q_staleness.context#}}
 
 
             # 質問
@@ -1131,10 +1141,8 @@ workflow:
 
             '
         context:
-          enabled: true
-          variable_selector:
-          - q_knowledge_retrieval
-          - result
+          enabled: false
+          variable_selector: []
         vision:
           enabled: false
       position:

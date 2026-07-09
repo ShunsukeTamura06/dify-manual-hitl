@@ -133,8 +133,8 @@ DSL は dify/workflows/phase1c-registration-bot.yml（実機からエクスポ�
 | 仕組み | 内容 | 状態 |
 |--------|------|------|
 | 出典必須 | 回答に必ず GROWI URL を付ける | Phase 1a 実装済 |
-| 更新日表示 | 「このマニュアルは {updated_at} 更新」を回答に添える | 1a プロンプトに追加予定 |
-| 古さ警告 | 一定期間更新がないページは「最新か確認を」と注記 | 追加予定 |
+| 更新日表示 | 出典に最終更新日を併記する | ✅ 実装済（`staleness` Code ノードが検索結果へ最終更新日を保持したまま LLM に渡し、プロンプトで出典併記を義務化） |
+| 古さ警告 | 一定期間更新がないページは「最新か確認を」と注記 | ✅ 実装済（経過日数の計算は Code で決定的に行い、閾値 180 日超で注記を自動付与。LLM は日付計算をしない） |
 | 矛盾検出 | 複数ソースが食い違えば両論併記 + 確認を促す | Phase 1a 実装済 |
 | フィードバック | 「この回答は違った」をページ修正につなげる | 運用ルール（将来 UI 化） |
 
@@ -169,7 +169,7 @@ DSL は dify/workflows/phase1c-registration-bot.yml（実機からエクスポ�
 1. **画像・図形を含むファイル**: Phase 2（Vision LLM 前処理）。1c はまずテキスト主体。
 2. **Document Extractor の Word/Excel 抽出品質**: 実ファイルで要確認（特に表）。
 3. ~~**status フィルタ同期**~~: ✅ 実装済み（sync の `SYNC_EXCLUDE_STATUSES`）。
-4. **質問 Bot への更新日表示・古さ警告の追加**: 1a プロンプト改訂。
+4. ~~**質問 Bot への更新日表示・古さ警告の追加**~~: ✅ 実装済み（[phase1a-qa-bot.yml](../dify/workflows/phase1a-qa-bot.yml) の `staleness` ノード）。
 5. ~~**HTTP Request ノードの認証**~~: ✅ 実装済み（Adapter の `ADAPTER_API_KEY` +
    DSL の `DOCSTORE_API_KEY` 環境変数で `X-API-Key` を送る）。
 
