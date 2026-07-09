@@ -8,12 +8,22 @@ from .clustering import (
     cluster_min_overlap,
     overlap_ratio,
 )
+from .execution import (
+    check_completeness,
+    is_approval,
+    prepare_merge_jobs,
+    select_executable,
+)
 
 __all__ = [
     "build_proposals",
     "build_proposals_from_content",
     "candidate_pairs_from_content",
+    "check_completeness",
     "classify_confidence",
     "cluster_min_overlap",
+    "is_approval",
     "overlap_ratio",
+    "prepare_merge_jobs",
+    "select_executable",
 ]

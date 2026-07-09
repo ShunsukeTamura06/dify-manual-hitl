@@ -14,6 +14,8 @@ from ..mappers import (
     page_to_growi_body,
 )
 from ..models import (
+    DeprecateRequest,
+    DeprecateResponse,
     GetContentRequest,
     GetContentResponse,
     Page,
@@ -25,6 +27,49 @@ from ..models import (
 from ..settings import get_settings
 
 router = APIRouter(tags=["pages"])
+
+
+@router.post("/pages/deprecate", response_model=DeprecateResponse)
+async def deprecate_pages(
+    req: DeprecateRequest,
+    growi: GrowiClient = Depends(get_growi_client),
+) -> DeprecateResponse:
+    """複数ページを退役する（status: deprecated + 統合先リンク追記）。
+
+    重複統合の実行で、統合元ページをまとめて退役させる。原典は破壊せず、
+    本文冒頭に統合先へのリンクを足し、frontmatter の status を deprecated にする。
+    退役ページは sync が Dify に同期しない（検索から消える）。冪等: 既に
+    deprecated でも再実行して無害。
+    """
+    settings = get_settings()
+    result = DeprecateResponse()
+    for page_id in req.page_ids:
+        if not page_id:
+            continue
+        try:
+            data = await growi.get_page(page_id)
+        except GrowiError as exc:
+            result.errors.append(f"{page_id}: 取得失敗 {exc}")
+            continue
+        growi_page = data.get("page", data)
+        page = growi_to_page(growi_page, settings.growi_base_url)
+        meta = dict(page.metadata)
+        meta["status"] = "deprecated"
+        note = ""
+        if req.redirect_path:
+            link = f"[{req.redirect_path}]({req.redirect_path})"
+            note = f"> ⚠️ このページは {link} に統合されました。\n\n"
+        # 既に退役リンクがある場合は二重付与しない（冪等）
+        content = page.content if note and note in page.content else note + page.content
+        body = page_to_growi_body(content, meta)
+        try:
+            await growi.update_page(
+                page_id=page_id, body=body, revision_id=extract_revision_id(growi_page)
+            )
+            result.deprecated.append(page_id)
+        except GrowiError as exc:
+            result.errors.append(f"{page_id}: 更新失敗 {exc}")
+    return result
 
 
 @router.post("/pages/get-content", response_model=GetContentResponse)

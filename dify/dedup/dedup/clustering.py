@@ -157,7 +157,7 @@ def build_proposals(
         min_score: クラスタ連結に必要な最小スコア。
 
     Returns:
-        提案 dict のリスト。各提案は cluster_id / page_ids / titles /
+        提案 dict のリスト。各提案は cluster_id / page_ids / titles / representative_id /
         representative_title / representative_path / min_overlap / confidence / lane を持つ。
     """
     by_id = {str(p.get("id", "")): p for p in pages}
@@ -180,6 +180,7 @@ def build_proposals(
                 "cluster_id": n,
                 "page_ids": [str(m.get("id", "")) for m in members],
                 "titles": titles,
+                "representative_id": str(rep.get("id", "")),
                 "representative_title": str(rep.get("title", "")),
                 "representative_path": str(rep.get("path", "")),
                 "min_overlap": round(min_ov, 3),

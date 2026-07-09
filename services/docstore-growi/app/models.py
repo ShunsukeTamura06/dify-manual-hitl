@@ -94,6 +94,24 @@ class UpsertRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class DeprecateRequest(BaseModel):
+    """複数ページを退役（status: deprecated）する（重複統合の実行用）。
+
+    統合先へ内容をマージした後、重複元ページをまとめて退役させる。即削除でなく
+    deprecated 化 + 統合先へのリンク追記に留める（原典破壊しない・戻せる）。
+    """
+
+    page_ids: list[str] = Field(description="退役するページ ID のリスト")
+    redirect_path: str = Field(
+        default="", description="統合先のパス（退役ページ本文にリンクとして追記する）"
+    )
+
+
+class DeprecateResponse(BaseModel):
+    deprecated: list[str] = Field(default_factory=list, description="退役できたページ ID")
+    errors: list[str] = Field(default_factory=list, description="失敗したページと理由")
+
+
 class GetContentRequest(BaseModel):
     """既存ページ本文の取得（マージ用）。page_id 空は許容（新規）。"""
 

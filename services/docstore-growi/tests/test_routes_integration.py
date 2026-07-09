@@ -265,6 +265,43 @@ def test_upsert_updates_when_target(client: TestClient) -> None:
 
 
 @respx.mock
+def test_deprecate_pages_sets_status_and_link(client: TestClient) -> None:
+    """退役: status を deprecated にし、統合先リンクを本文冒頭に足す。"""
+    respx.get(f"{GROWI_BASE}/_api/v3/page").mock(
+        return_value=httpx.Response(200, json=_growi_single_page_response())
+    )
+    put_route = respx.put(f"{GROWI_BASE}/_api/v3/page").mock(
+        return_value=httpx.Response(200, json={
+            "page": {"_id": "65a1b2c3d4e5f60001", "path": "/manuals/x",
+                     "updatedAt": "2026-06-10T00:00:00.000Z",
+                     "revision": {"_id": "r2", "body": "x"}}})
+    )
+    resp = client.post("/pages/deprecate", json={
+        "page_ids": ["65a1b2c3d4e5f60001"],
+        "redirect_path": "/manuals/経理/経費精算/_howto/統合先"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["deprecated"] == ["65a1b2c3d4e5f60001"]
+    assert body["errors"] == []
+    sent = put_route.calls[0].request.content.decode()
+    assert "status: deprecated" in sent
+    assert "統合先" in sent  # 統合先リンクが本文に入る
+
+
+@respx.mock
+def test_deprecate_pages_collects_errors(client: TestClient) -> None:
+    """一部が取得失敗しても他は退役し、errors に記録する（全体を止めない）。"""
+    respx.get(f"{GROWI_BASE}/_api/v3/page").mock(
+        return_value=httpx.Response(404, json={"error": "not found"})
+    )
+    resp = client.post("/pages/deprecate", json={"page_ids": ["missing"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["deprecated"] == []
+    assert len(body["errors"]) == 1
+
+
+@respx.mock
 def test_update_page_with_string_revision(client: TestClient) -> None:
     """GROWI が revision を文字列で返す形でも更新できる（バージョン差対応）。"""
     single = {
