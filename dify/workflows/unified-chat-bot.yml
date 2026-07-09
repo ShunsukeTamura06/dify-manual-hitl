@@ -468,8 +468,18 @@ workflow:
         isInIteration: true
         iteration_id: d_merge_iter
       zIndex: 1002
-    - id: d_m_merge_llm-source-d_m_build_body
+    - id: d_m_merge_llm-source-d_m_check
       source: d_m_merge_llm
+      sourceHandle: source
+      target: d_m_check
+      targetHandle: target
+      type: custom
+      data:
+        isInIteration: true
+        iteration_id: d_merge_iter
+      zIndex: 1002
+    - id: d_m_check-source-d_m_build_body
+      source: d_m_check
       sourceHandle: source
       target: d_m_build_body
       targetHandle: target
@@ -2122,9 +2132,10 @@ workflow:
           \           \"representative_id\": rep_id,\n            \"representative_path\"\
           : str(rep.get(\"path\", \"\")),\n            \"representative_title\": str(rep.get(\"\
           title\", \"\")),\n            \"merge_input\": merge_input,\n          \
-          \  \"deprecated_ids\": [i for i in page_ids if i != rep_id and i in by_id],\n\
-          \        })\n    return jobs\n\n\ndef main(query, proposals, pages) -> dict:\n\
-          \    approved = _is_approval(query)\n    jobs = _prepare_jobs(proposals\
+          \  \"member_contents\": [str(m.get(\"content\", \"\")) for m in members],\n\
+          \            \"deprecated_ids\": [i for i in page_ids if i != rep_id and\
+          \ i in by_id],\n        })\n    return jobs\n\n\ndef main(query, proposals,\
+          \ pages) -> dict:\n    approved = _is_approval(query)\n    jobs = _prepare_jobs(proposals\
           \ or [], pages or []) if approved else []\n    mode = \"execute\" if (approved\
           \ and jobs) else \"propose\"\n    return {\"mode\": mode, \"jobs\": jobs,\
           \ \"count\": len(jobs)}\n"
@@ -2221,8 +2232,8 @@ workflow:
           \      \"representative_id\": str(item.get(\"representative_id\", \"\")),\n\
           \        \"representative_path\": str(item.get(\"representative_path\",\
           \ \"\")),\n        \"representative_title\": str(item.get(\"representative_title\"\
-          , \"\")),\n        \"deprecated_ids\": item.get(\"deprecated_ids\", []),\n\
-          \    }\n"
+          , \"\")),\n        \"member_contents\": item.get(\"member_contents\", []),\n\
+          \        \"deprecated_ids\": item.get(\"deprecated_ids\", []),\n    }\n"
         outputs:
           merge_input:
             children: null
@@ -2236,6 +2247,9 @@ workflow:
           representative_title:
             children: null
             type: string
+          member_contents:
+            children: null
+            type: array[string]
           deprecated_ids:
             children: null
             type: array[string]
@@ -2294,20 +2308,86 @@ workflow:
       zIndex: 1002
     - data:
         type: code
+        title: 完全性チェック
+        code_language: python3
+        code: "\nimport difflib\n\nCOMPLETENESS_THRESHOLD = 0.7\n\n\ndef _norm(text):\n\
+          \    return \" \".join((text or \"\").split())\n\n\ndef _best_window_ratio(haystack,\
+          \ needle):\n    n = len(needle)\n    if n == 0 or len(haystack) < n:\n \
+          \       return 0.0\n    best = 0.0\n    step = max(1, n // 4)\n    for start\
+          \ in range(0, len(haystack) - n + 1, step):\n        r = difflib.SequenceMatcher(None,\
+          \ needle, haystack[start:start + n]).ratio()\n        if r > best:\n   \
+          \         best = r\n            if best >= 0.95:\n                break\n\
+          \    return best\n\n\ndef _contains(haystack_norm, line_norm):\n    if line_norm\
+          \ in haystack_norm:\n        return True\n    ratio = difflib.SequenceMatcher(None,\
+          \ line_norm, haystack_norm).ratio()\n    return ratio >= 0.6 or _best_window_ratio(haystack_norm,\
+          \ line_norm) >= 0.8\n\n\ndef main(merged_content: str, member_contents)\
+          \ -> dict:\n    norm_merged = _norm(merged_content)\n    warnings = []\n\
+          \    worst = 1.0\n    for idx, content in enumerate(member_contents or []):\n\
+          \        lines = [_norm(ln) for ln in (content or \"\").splitlines() if\
+          \ _norm(ln)]\n        signif = [ln for ln in lines if len(ln) >= 4 and ln\
+          \ not in (\"---\",)]\n        if not signif:\n            continue\n   \
+          \     present = sum(1 for ln in signif if _contains(norm_merged, ln))\n\
+          \        coverage = present / len(signif)\n        worst = min(worst, coverage)\n\
+          \        if coverage < COMPLETENESS_THRESHOLD:\n            warnings.append(f\"\
+          元ページ{idx + 1}: 内容の{round(coverage * 100)}%程度しか統合本文に見当たりません\")\n    return\
+          \ {\"ok\": 0 if warnings else 1, \"coverage\": round(worst, 3), \"warnings\"\
+          : warnings}\n"
+        desc: 元ページの主張が統合本文から欠落していないか機械チェック（HITLの補助）
+        outputs:
+          ok:
+            children: null
+            type: number
+          coverage:
+            children: null
+            type: number
+          warnings:
+            children: null
+            type: array[string]
+        variables:
+        - variable: merged_content
+          value_selector:
+          - d_m_merge_llm
+          - text
+        - variable: member_contents
+          value_selector:
+          - d_m_unpack
+          - member_contents
+        isInIteration: true
+        iteration_id: d_merge_iter
+      id: d_m_check
+      position:
+        x: 480
+        y: 1190
+      type: custom
+      parentId: d_merge_iter
+      zIndex: 1002
+    - data:
+        type: code
         title: upsertボディ組立
         code_language: python3
-        code: "\nimport json\n\n\ndef main(target_page_id: str, path: str, title:\
-          \ str, content: str) -> dict:\n    lines = content.split(\"\\n\")\n    if\
-          \ lines and lines[0].strip() == \"---\":\n        try:\n            end\
-          \ = lines[1:].index(\"---\") + 1\n        except ValueError:\n         \
-          \   end = -1\n        if end > 0:\n            fm = [ln for ln in lines[1:end]\
-          \ if not ln.strip().startswith(\"status:\")]\n            fm.append(\"status:\
-          \ draft\")\n            content = \"\\n\".join([\"---\"] + fm + lines[end:])\n\
-          \    else:\n        content = \"---\\nstatus: draft\\n---\\n\" + content\n\
-          \    body = json.dumps({\n        \"target_page_id\": target_page_id or\
-          \ \"\",\n        \"path\": path, \"title\": title,\n        \"content\"\
-          : content, \"metadata\": {},\n    }, ensure_ascii=False)\n    return {\"\
-          body\": body}\n"
+        code: "\nimport json\n\n\ndef main(\n    target_page_id: str, path: str, title:\
+          \ str, content: str,\n    completeness_ok, completeness_warnings,\n) ->\
+          \ dict:\n    completeness_ok = bool(completeness_ok)\n    lines = content.split(\"\
+          \\n\")\n    if lines and lines[0].strip() == \"---\":\n        try:\n  \
+          \          end = lines[1:].index(\"---\") + 1\n        except ValueError:\n\
+          \            end = -1\n        if end > 0:\n            fm = [ln for ln\
+          \ in lines[1:end] if not ln.strip().startswith(\"status:\")]\n         \
+          \   fm.append(\"status: draft\")\n            content = \"\\n\".join([\"\
+          ---\"] + fm + lines[end:])\n    else:\n        content = \"---\\nstatus:\
+          \ draft\\n---\\n\" + content\n\n    if not completeness_ok:\n        detail\
+          \ = \"\\n\".join(f\"> - {w}\" for w in (completeness_warnings or []))\n\
+          \        banner = (\n            \"> ⚠️ **完全性チェック警告**: 統合元ページの内容が一部欠落している\"\
+          \n            \"可能性があります。公開前に必ず原文と見比べてご確認ください。\\n\"\n            f\"{detail}\\\
+          n\\n\"\n        )\n        # frontmatter (---...---) の直後にバナーを挿入する\n    \
+          \    lines2 = content.split(\"\\n\")\n        if lines2 and lines2[0].strip()\
+          \ == \"---\":\n            try:\n                end2 = lines2[1:].index(\"\
+          ---\") + 1\n                content = \"\\n\".join(lines2[: end2 + 1]) +\
+          \ \"\\n\\n\" + banner + \"\\n\".join(lines2[end2 + 1:])\n            except\
+          \ ValueError:\n                content = banner + content\n        else:\n\
+          \            content = banner + content\n\n    body = json.dumps({\n   \
+          \     \"target_page_id\": target_page_id or \"\",\n        \"path\": path,\
+          \ \"title\": title,\n        \"content\": content, \"metadata\": {},\n \
+          \   }, ensure_ascii=False)\n    return {\"body\": body}\n"
         outputs:
           body:
             children: null
@@ -2329,11 +2409,19 @@ workflow:
           value_selector:
           - d_m_merge_llm
           - text
+        - variable: completeness_ok
+          value_selector:
+          - d_m_check
+          - ok
+        - variable: completeness_warnings
+          value_selector:
+          - d_m_check
+          - warnings
         isInIteration: true
         iteration_id: d_merge_iter
       id: d_m_build_body
       position:
-        x: 580
+        x: 600
         y: 1190
       type: custom
       parentId: d_merge_iter
@@ -2434,7 +2522,7 @@ workflow:
 
           重複元は退役（deprecated）にし、統合先へのリンクを付けました（検索には出ません）。
 
-          ※ 統合は情報の欠落が起きていないか、公開前に必ずご確認ください。'
+          ※ 統合は情報の欠落が起きていないか、公開前に必ずご確認ください（自動チェックで欠落の疑いがあれば統合先ページ冒頭に警告を入れています）。'
         variables: []
       id: d_exec_answer
       position:

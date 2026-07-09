@@ -4,6 +4,11 @@
 高確信クラスタを実際に統合・退役する execute 分岐を追加する。会話変数は使わず、実行
 ターンで再検出する（検出は決定的なので冪等。統合済みは再検出で候補に挙がらない）。
 
+統合直後に**完全性チェック**（execution.check_completeness と同じロジック）を挟み、
+元ページの主張が統合本文から欠落していそうなら、統合先ページ本文の冒頭に警告バナーを
+埋め込む（人が GROWI で公開前に確認する場所に直接出すのが最も効果的。ハードなゲートに
+はせず、最終判断は人に委ねる＝HITL）。
+
 決定的ロジックの真実は dify/dedup/dedup/（clustering.py / execution.py）とそのテスト。
 本スクリプトはそれと同じロジックを Dify Code ノードにインライン展開する（既存 build
 ノードが clustering をインラインしているのと同じ方式。dedup-design.md 参照）。
@@ -58,6 +63,7 @@ def _prepare_jobs(proposals, pages):
             "representative_path": str(rep.get("path", "")),
             "representative_title": str(rep.get("title", "")),
             "merge_input": merge_input,
+            "member_contents": [str(m.get("content", "")) for m in members],
             "deprecated_ids": [i for i in page_ids if i != rep_id and i in by_id],
         })
     return jobs
@@ -78,16 +84,73 @@ def main(item: dict) -> dict:
         "representative_id": str(item.get("representative_id", "")),
         "representative_path": str(item.get("representative_path", "")),
         "representative_title": str(item.get("representative_title", "")),
+        "member_contents": item.get("member_contents", []),
         "deprecated_ids": item.get("deprecated_ids", []),
     }
 '''
 
+# execution.check_completeness と同じロジック（Code ノードにインライン展開）。
+# 元ページの主張が統合本文から欠落していないかを機械チェックする（HITL の補助シグナル）。
+CHECK_COMPLETENESS_CODE = '''
+import difflib
+
+COMPLETENESS_THRESHOLD = 0.7
+
+
+def _norm(text):
+    return " ".join((text or "").split())
+
+
+def _best_window_ratio(haystack, needle):
+    n = len(needle)
+    if n == 0 or len(haystack) < n:
+        return 0.0
+    best = 0.0
+    step = max(1, n // 4)
+    for start in range(0, len(haystack) - n + 1, step):
+        r = difflib.SequenceMatcher(None, needle, haystack[start:start + n]).ratio()
+        if r > best:
+            best = r
+            if best >= 0.95:
+                break
+    return best
+
+
+def _contains(haystack_norm, line_norm):
+    if line_norm in haystack_norm:
+        return True
+    ratio = difflib.SequenceMatcher(None, line_norm, haystack_norm).ratio()
+    return ratio >= 0.6 or _best_window_ratio(haystack_norm, line_norm) >= 0.8
+
+
+def main(merged_content: str, member_contents) -> dict:
+    norm_merged = _norm(merged_content)
+    warnings = []
+    worst = 1.0
+    for idx, content in enumerate(member_contents or []):
+        lines = [_norm(ln) for ln in (content or "").splitlines() if _norm(ln)]
+        signif = [ln for ln in lines if len(ln) >= 4 and ln not in ("---",)]
+        if not signif:
+            continue
+        present = sum(1 for ln in signif if _contains(norm_merged, ln))
+        coverage = present / len(signif)
+        worst = min(worst, coverage)
+        if coverage < COMPLETENESS_THRESHOLD:
+            warnings.append(f"元ページ{idx + 1}: 内容の{round(coverage * 100)}%程度しか統合本文に見当たりません")
+    return {"ok": 0 if warnings else 1, "coverage": round(worst, 3), "warnings": warnings}
+'''
+
 # 統合本文を upsert ボディにする。status は決定的に draft を強制（人が再確認して公開）。
+# 完全性チェックで欠落の疑いがあれば、本文冒頭（frontmatter の直後）に警告バナーを挿入する。
 BUILD_MERGEBODY_CODE = '''
 import json
 
 
-def main(target_page_id: str, path: str, title: str, content: str) -> dict:
+def main(
+    target_page_id: str, path: str, title: str, content: str,
+    completeness_ok, completeness_warnings,
+) -> dict:
+    completeness_ok = bool(completeness_ok)
     lines = content.split("\\n")
     if lines and lines[0].strip() == "---":
         try:
@@ -100,6 +163,25 @@ def main(target_page_id: str, path: str, title: str, content: str) -> dict:
             content = "\\n".join(["---"] + fm + lines[end:])
     else:
         content = "---\\nstatus: draft\\n---\\n" + content
+
+    if not completeness_ok:
+        detail = "\\n".join(f"> - {w}" for w in (completeness_warnings or []))
+        banner = (
+            "> ⚠️ **完全性チェック警告**: 統合元ページの内容が一部欠落している"
+            "可能性があります。公開前に必ず原文と見比べてご確認ください。\\n"
+            f"{detail}\\n\\n"
+        )
+        # frontmatter (---...---) の直後にバナーを挿入する
+        lines2 = content.split("\\n")
+        if lines2 and lines2[0].strip() == "---":
+            try:
+                end2 = lines2[1:].index("---") + 1
+                content = "\\n".join(lines2[: end2 + 1]) + "\\n\\n" + banner + "\\n".join(lines2[end2 + 1:])
+            except ValueError:
+                content = banner + content
+        else:
+            content = banner + content
+
     body = json.dumps({
         "target_page_id": target_page_id or "",
         "path": path, "title": title,
@@ -165,7 +247,7 @@ def build() -> dict:
 
     # 冪等化: 以前に生成した execute 分岐のノード/エッジを一旦すべて除去してから作り直す
     gen = {"decide", "mode_ifelse", "merge_iter", "merge_iterstart", "m_unpack",
-           "m_merge_llm", "m_build_body", "m_http_upsert", "m_dep_body",
+           "m_merge_llm", "m_check", "m_build_body", "m_http_upsert", "m_dep_body",
            "m_http_deprecate", "exec_answer"}
     graph["nodes"] = [n for n in graph["nodes"] if n["id"] not in gen]
     graph["edges"] = [
@@ -270,6 +352,7 @@ def build() -> dict:
                     "outputs": {k: {"children": None, "type": t} for k, t in [
                         ("merge_input", "string"), ("representative_id", "string"),
                         ("representative_path", "string"), ("representative_title", "string"),
+                        ("member_contents", "array[string]"),
                         ("deprecated_ids", "array[string]")]},
                     "variables": [{"variable": "item", "value_selector": [IT, "item"]}]},
                    140, 90, parent=IT)
@@ -283,6 +366,19 @@ def build() -> dict:
                        "vision": {"enabled": False}},
                       360, 90, parent=IT)
 
+    check = _node("m_check", "code", "完全性チェック",
+                  {"code_language": "python3", "code": CHECK_COMPLETENESS_CODE,
+                   "desc": "元ページの主張が統合本文から欠落していないか機械チェック（HITLの補助）",
+                   "outputs": {
+                       "ok": {"children": None, "type": "number"},
+                       "coverage": {"children": None, "type": "number"},
+                       "warnings": {"children": None, "type": "array[string]"},
+                   },
+                   "variables": [
+                       {"variable": "merged_content", "value_selector": ["m_merge_llm", "text"]},
+                       {"variable": "member_contents", "value_selector": ["m_unpack", "member_contents"]}]},
+                  480, 90, parent=IT)
+
     mergebody = _node("m_build_body", "code", "upsertボディ組立",
                       {"code_language": "python3", "code": BUILD_MERGEBODY_CODE,
                        "outputs": {"body": {"children": None, "type": "string"}},
@@ -290,8 +386,10 @@ def build() -> dict:
                            {"variable": "target_page_id", "value_selector": ["m_unpack", "representative_id"]},
                            {"variable": "path", "value_selector": ["m_unpack", "representative_path"]},
                            {"variable": "title", "value_selector": ["m_unpack", "representative_title"]},
-                           {"variable": "content", "value_selector": ["m_merge_llm", "text"]}]},
-                      580, 90, parent=IT)
+                           {"variable": "content", "value_selector": ["m_merge_llm", "text"]},
+                           {"variable": "completeness_ok", "value_selector": ["m_check", "ok"]},
+                           {"variable": "completeness_warnings", "value_selector": ["m_check", "warnings"]}]},
+                      600, 90, parent=IT)
 
     http_upsert = _node("m_http_upsert", "http-request", "統合先を更新",
                         _http("post", "{{#env.DOCSTORE_URL#}}/pages/upsert", "{{#m_build_body.body#}}"),
@@ -313,7 +411,8 @@ def build() -> dict:
                         {"answer": "{{#decide.count#}} 件の重複クラスタを統合しました。\n\n"
                                    "統合先は下書き（draft）にしました。GROWI で内容を確認して公開してください。\n"
                                    "重複元は退役（deprecated）にし、統合先へのリンクを付けました（検索には出ません）。\n"
-                                   "※ 統合は情報の欠落が起きていないか、公開前に必ずご確認ください。",
+                                   "※ 統合は情報の欠落が起きていないか、公開前に必ずご確認ください"
+                                   "（自動チェックで欠落の疑いがあれば統合先ページ冒頭に警告を入れています）。",
                          "variables": []},
                         2680, 560)
 
@@ -321,7 +420,7 @@ def build() -> dict:
     graph["edges"] = [e for e in graph["edges"] if not (e["source"] == "build" and e["target"] == "format")]
 
     new_nodes = [decide, ifelse, merge_iter, it_start, unpack, merge_llm,
-                 mergebody, http_upsert, depbody, http_dep, exec_answer]
+                 check, mergebody, http_upsert, depbody, http_dep, exec_answer]
     graph["nodes"].extend(new_nodes)
     graph["edges"].extend([
         _edge("build", "decide"),
@@ -332,7 +431,8 @@ def build() -> dict:
         # iteration 内部
         _edge("merge_iterstart", "m_unpack", in_iter=True, iter_id=IT),
         _edge("m_unpack", "m_merge_llm", in_iter=True, iter_id=IT),
-        _edge("m_merge_llm", "m_build_body", in_iter=True, iter_id=IT),
+        _edge("m_merge_llm", "m_check", in_iter=True, iter_id=IT),
+        _edge("m_check", "m_build_body", in_iter=True, iter_id=IT),
         _edge("m_build_body", "m_http_upsert", in_iter=True, iter_id=IT),
         _edge("m_http_upsert", "m_dep_body", in_iter=True, iter_id=IT),
         _edge("m_dep_body", "m_http_deprecate", in_iter=True, iter_id=IT),
