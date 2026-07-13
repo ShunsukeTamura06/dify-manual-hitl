@@ -24,6 +24,9 @@ def _configure_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GROWI_BASE_URL", GROWI_BASE)
     monkeypatch.setenv("GROWI_API_TOKEN", "test-token")
     monkeypatch.setenv("MANUAL_ROOT_PATH", "/manuals")
+    # 開発者のローカル .env（診断用に true にしていることがある）から独立させる。
+    monkeypatch.setenv("DEBUG_ENDPOINTS_ENABLED", "false")
+    monkeypatch.setenv("ADAPTER_API_KEY", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

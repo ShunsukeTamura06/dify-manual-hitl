@@ -1,5 +1,7 @@
 # 重複排除Bot — dify/dedup/tools/build_dedup_dsl.py が生成（提示→承認→統合→退役）
 # 決定的ロジックの真実は dify/dedup/（clustering.py / execution.py）とテスト。
+# 一覧取得(http_list)・フィルタ(parse_list)・提案整形(build/format)は
+# build_dedup_dsl.py の管理外（このファイルを直接編集する）。
 # インポート後: environment_variables の DOCSTORE_URL / DOCSTORE_API_KEY、LLM モデル。
 app:
   description: 重複排除Bot. Wikiの重複ページを検出し、統合候補を確信度つきで提案する（v1 提示まで）。
@@ -337,7 +339,7 @@ workflow:
           max_write_timeout: 60
         title: ページ一覧取得
         type: http-request
-        url: '{{#env.DOCSTORE_URL#}}/pages?limit=500'
+        url: '{{#env.DOCSTORE_URL#}}/pages?path_prefix={{#scope.prefix#}}&limit=500'
         variables: []
       height: 120
       id: http_list
@@ -352,18 +354,21 @@ workflow:
       type: custom
       width: 244
     - data:
-        code: "\nimport json\n\ndef main(body, prefix: str) -> dict:\n    try:\n \
-          \       d = json.loads(body) if isinstance(body, str) else (body or {})\n\
-          \    except Exception:\n        d = {}\n    pages = d.get(\"pages\", [])\
-          \ if isinstance(d, dict) else []\n    prefix = prefix or \"/manuals\"\n\
-          \    ids = []\n    metas = []\n    for p in pages:\n        if not isinstance(p,\
+        code: "\nimport json\n\nLIMIT = 30\n\n\ndef main(body, prefix: str) -> dict:\n\
+          \    try:\n        d = json.loads(body) if isinstance(body, str) else (body\
+          \ or {})\n    except Exception:\n        d = {}\n    pages = d.get(\"pages\"\
+          , []) if isinstance(d, dict) else []\n    prefix = prefix or \"/manuals\"\
+          \n    ids = []\n    metas = []\n    for p in pages:\n        if not isinstance(p,\
           \ dict):\n            continue\n        path = str(p.get(\"path\", \"\"\
           ))\n        pid = str(p.get(\"id\", \"\"))\n        if not pid or not path.startswith(prefix):\n\
           \            continue\n        ids.append(pid)\n        metas.append({\"\
           id\": pid, \"title\": str(p.get(\"title\", \"\")), \"path\": path})\n  \
-          \  return {\"page_ids\": ids, \"metas\": metas}\n"
+          \  total = len(metas)\n    truncated = 1 if total > LIMIT else 0\n    return\
+          \ {\n        \"page_ids\": ids[:LIMIT],\n        \"metas\": metas[:LIMIT],\n\
+          \        \"truncated\": truncated,\n        \"total_matched\": total,\n\
+          \    }\n"
         code_language: python3
-        desc: 接頭辞でフィルタしページIDとメタを出す（30件上限に注意）
+        desc: 接頭辞でフィルタしページIDとメタを出す（Difyの配列出力上限30件で切り詰め、超過時はtruncatedを立てる）
         outputs:
           metas:
             children: null
@@ -371,6 +376,12 @@ workflow:
           page_ids:
             children: null
             type: array[string]
+          truncated:
+            children: null
+            type: number
+          total_matched:
+            children: null
+            type: number
         selected: false
         title: 一覧フィルタ
         type: code
@@ -582,26 +593,31 @@ workflow:
       type: custom
       width: 244
     - data:
-        code: "\ndef main(proposals) -> dict:\n    proposals = proposals or []\n \
-          \   bulk = [p for p in proposals if p.get(\"lane\") == \"bulk\"]\n    review\
-          \ = [p for p in proposals if p.get(\"lane\") != \"bulk\"]\n    lines = []\n\
-          \    lines.append(\"重複候補を \" + str(len(proposals)) + \" クラスタ検出しました。\")\n\
+        code: "\ndef main(proposals, truncated, total_matched) -> dict:\n    proposals\
+          \ = proposals or []\n    bulk = [p for p in proposals if p.get(\"lane\"\
+          ) == \"bulk\"]\n    review = [p for p in proposals if p.get(\"lane\") !=\
+          \ \"bulk\"]\n    lines = []\n    if truncated:\n        lines.append(\n\
+          \            \"\\u26a0\\ufe0f 対象が\" + str(total_matched) + \"件あり、一度に確認できる上限(30件)を超えたため\"\
+          \n            \"先頭30件のみ確認しました。パスを絞って「/manuals/経理部 の重複を確認して」のように\"\n    \
+          \        \"範囲を絞って再実行してください。\"\n        )\n        lines.append(\"\")\n \
+          \   lines.append(\"重複候補を \" + str(len(proposals)) + \" クラスタ検出しました。\")\n\
           \    lines.append(\"\")\n    if bulk:\n        lines.append(\"【高確信・一括承認候補】(\"\
           \ + str(len(bulk)) + \"件)\")\n        for p in bulk:\n            lines.append(\"\
           - 「\" + str(p.get(\"representative_title\", \"\")) + \"」 重複 \"\n       \
-          \                  + str(len(p.get(\"page_ids\", []))) + \"ページ (重なり \"\n\
-          \                         + str(round(p.get(\"min_overlap\", 0) * 100))\
+          \                   + str(len(p.get(\"page_ids\", []))) + \"ページ (重なり \"\n\
+          \                          + str(round(p.get(\"min_overlap\", 0) * 100))\
           \ + \"%)\")\n            for t in p.get(\"titles\", []):\n             \
           \   lines.append(\"    ・\" + str(t))\n        lines.append(\"\")\n    if\
           \ review:\n        lines.append(\"【要確認・個別承認】(\" + str(len(review)) + \"\
           件)\")\n        for p in review:\n            lines.append(\"- 「\" + str(p.get(\"\
-          representative_title\", \"\")) + \"」 類似 \"\n                         + str(len(p.get(\"\
-          page_ids\", []))) + \"ページ (重なり \"\n                         + str(round(p.get(\"\
-          min_overlap\", 0) * 100)) + \"%, 要確認)\")\n            for t in p.get(\"\
-          titles\", []):\n                lines.append(\"    ・\" + str(t))\n     \
-          \   lines.append(\"\")\n    if not proposals:\n        lines.append(\"(重複候補は見つかりませんでした)\"\
-          )\n    lines.append(\"※ 高確信の重複を統合するには「統合して」「実行」と送ってください\"\n            \
-          \     \"（統合先は下書き、重複元は退役になります）。\")\n    return {\"text\": \"\\n\".join(lines)}\n"
+          representative_title\", \"\")) + \"」 類似 \"\n                          +\
+          \ str(len(p.get(\"page_ids\", []))) + \"ページ (重なり \"\n                  \
+          \        + str(round(p.get(\"min_overlap\", 0) * 100)) + \"%, 要確認)\")\n\
+          \            for t in p.get(\"titles\", []):\n                lines.append(\"\
+          \    ・\" + str(t))\n            lines.append(\"\")\n    if not proposals:\n\
+          \        lines.append(\"(重複候補は見つかりませんでした)\")\n    lines.append(\"※ 高確信の重複を統合するには「統合して」「実行」と送ってください\"\
+          \n                  \"（統合先は下書き、重複元は退役になります）。\")\n    return {\"text\": \"\
+          \\n\".join(lines)}\n"
         code_language: python3
         desc: 提案をlane別に読みやすく整形
         outputs:
@@ -616,6 +632,14 @@ workflow:
           - build
           - proposals
           variable: proposals
+        - value_selector:
+          - parse_list
+          - truncated
+          variable: truncated
+        - value_selector:
+          - parse_list
+          - total_matched
+          variable: total_matched
       height: 54
       id: format
       position:

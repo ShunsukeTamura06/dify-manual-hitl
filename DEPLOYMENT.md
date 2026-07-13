@@ -23,8 +23,10 @@
                   ↑           ↑              ↑
 ┌─ このリポジトリが提供する成果物 ─────────────────────────┐
 │ A. DocStore Adapter   … ① の Wiki を統一 API で隠蔽       │
-│ B. Sync Service       … ① → ② の Knowledge へ同期         │
-│ C. Bot DSL（2 種）    … ② にインポートする登録/質問 Bot    │
+│ B. Sync Service       … ① → ② の Knowledge へ自動同期      │
+│    （定期 cron + GROWI webhook の二層）                    │
+│ C. 完全 bot（1 Chatflow） … ② にインポートする単一チャット  │
+│    質問・登録・一括取込・重複排除・承認待ち確認を1窓口で    │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -108,39 +110,68 @@ Dify 管理画面、またはデータセット API で:
 
 ### Step 4. Bot を Dify にインポート
 
-Dify「スタジオ → アプリ作成 → DSL からインポート」で 2 つ:
-- 質問 Bot: [dify/workflows/phase1a-qa-bot.yml](dify/workflows/phase1a-qa-bot.yml)
-- 登録 Bot: [dify/workflows/phase1c-registration-bot.yml](dify/workflows/phase1c-registration-bot.yml)
+Dify「スタジオ → アプリ作成 → DSL からインポート」で、**まず 1 つだけ**インポートすれば動く:
+
+- **[dify/workflows/unified-chat-bot.yml](dify/workflows/unified-chat-bot.yml)**（完全 bot・推奨）
+  質問・登録・一括取り込み・重複排除の提示/統合・承認待ち確認の 5 機能を
+  **1 つのチャット窓口**で受ける。ユーザーの発話や添付ファイルから LLM 意図分類 +
+  決定的サニタイズでルーティングする（詳細は
+  [docs/unified-chat-design.md](docs/unified-chat-design.md)）。エンドユーザーが
+  使うのはこれ 1 本でよい。
 
 インポート後、**環境に合わせて差し替える**のは以下だけ:
 
-| Bot | 差し替え箇所 |
+| 箇所 | 差し替え内容 |
 |-----|-------------|
-| 共通 | LLM ノードのモデル（あなたの LLM。例 gpt-4o-mini / claude 等） |
-| 質問 Bot | Knowledge Retrieval のナレッジ（Step 3）。Reranker 未設定なら検索を weighted_score に |
-| 登録 Bot | environment_variables の `DOCSTORE_URL`（Adapter の到達 URL） |
+| LLM ノード（8 箇所）のモデル | あなたの LLM（例 gpt-4o-mini / claude 等）。既定は gpt-4o-mini |
+| `q_knowledge_retrieval` / `similar_search` の `dataset_ids` | `REPLACE_WITH_YOUR_DATASET_ID` → Step 3 の Dataset ID（**2 箇所とも**同じナレッジに向ける） |
+| `q_knowledge_retrieval` の Reranker | Reranker 未設定なら `reranking_enable: false` + `weighted_score` に（`similar_search` と同じ形）。設定済みなら `REPLACE_WITH_RERANKER_PROVIDER` / `REPLACE_WITH_RERANKER_MODEL` を実値に |
+| environment_variables の `DOCSTORE_URL` / `DOCSTORE_API_KEY` | Adapter の到達 URL / API キー（Step 2 の到達性、`ADAPTER_API_KEY` を設定した場合のみキー必須） |
+
+> 個別 Bot（[phase1a-qa-bot.yml](dify/workflows/phase1a-qa-bot.yml) /
+> [phase1c-registration-bot.yml](dify/workflows/phase1c-registration-bot.yml) /
+> [bulk-import-bot.yml](dify/workflows/bulk-import-bot.yml) /
+> [dedup-bot.yml](dify/workflows/dedup-bot.yml)）は unified-chat-bot.yml の
+> **構成部品のソース**（`dify/unified-chat/tools/build_dsl.py` が合成する元 DSL）。
+> 動作確認や機能単体のデバッグには使えるが、通常のデプロイでは不要。
 
 詳細は [dify/workflows/phase1c-setup.md](dify/workflows/phase1c-setup.md)、
 [dify/workflows/README.md](dify/workflows/README.md)。
 
-### Step 5. 初回同期 + 定期実行
+### Step 5. 同期を自動化する
 
+初回（Wiki の既存ページを Dify に取り込む）:
 ```bash
-# 初回（Wiki の既存ページを Dify に取り込む）
 curl -X POST http://<sync>/sync -H 'Content-Type: application/json' -d '{"mode":"full"}'
 ```
 
-定期実行は外部 cron で `POST /sync` を叩く（Sync 自身はスケジューラを持たない）。
-例は [services/sync/README.md](services/sync/README.md)。
+以降は 2 層の自動反映で「Wiki で公開 → 質問 Bot が拾う」まで人手を挟まない
+（`services/docker-compose.yml` に組み込み済み）:
+
+1. **定期 cron**（`sync-cron` コンテナ）: `SYNC_CRON_INTERVAL` 秒ごと（既定 900 秒）に
+   `POST /sync {"mode":"full"}` を自動実行。取りこぼしの保険。
+2. **GROWI webhook**: ページ公開のたびに GROWI から `POST /webhook/growi` を叩かせ、
+   即時に差分同期。`GROWI_WEBHOOK_TOKEN` を設定すると認証必須になる
+   （同時実行はロックでスキップ、二重実行しない）。
+
+設定は [services/sync/README.md](services/sync/README.md) の「自動同期」節を参照。
 
 ---
 
 ## 動作確認（一気通貫）
 
-1. 登録 Bot にマニュアル（ファイル）を投げる → Wiki に下書きが作られる
-2. Wiki で内容を確認して公開する（HITL）
-3. 同期する（cron もしくは手動 `POST /sync`）
-4. 質問 Bot に質問する → 出典付きで回答が返る
+1. 完全 bot にマニュアル（ファイル）を添付して送る → Wiki に下書き（draft）が作られる。
+   類似ページがあれば併せて提示される（ブロックはしない）
+2. 完全 bot に「承認待ち一覧を見せて」と聞く → 下書き中のページが一覧表示される
+   （`GET /pages/pending-approval`）
+3. Wiki で内容を確認し、`status: published` にして公開する（これが HITL の承認操作）
+4. 自動同期（cron または GROWI webhook。手動なら `POST /sync`）で Dify Knowledge に反映
+5. 完全 bot に質問する → 出典 URL + 最終更新日つきで回答が返る。古い情報には
+   自動で「最新か確認を」の注記が付く
+6. （任意）大きなファイルを添付すると自動で分割登録、「重複を確認して」と聞くと
+   類似ページのクラスタを確信度つきで提示し、「統合して」で高確信クラスタを
+   実際に統合（統合先は draft、統合元は deprecated + リダイレクト注記）。統合直後は
+   欠落の疑いがあれば統合先ページに自動で警告バナーを入れる
 
 ローカルでこの全ループを実機検証済み（[local-dev/README.md](local-dev/README.md)）。
 
@@ -152,8 +183,11 @@ curl -X POST http://<sync>/sync -H 'Content-Type: application/json' -d '{"mode":
 - [ ] `sync/.env` の Dify 接続先・キーが新環境のものか
 - [ ] Dify に LLM + 埋め込みモデルが設定されているか
 - [ ] Adapter が Dify のワークフローから到達できるネットワーク配置か
-- [ ] Bot DSL をインポートし、モデル/ナレッジ/DOCSTORE_URL を差し替えたか
-- [ ] 初回 full sync が成功し、質問 Bot が出典付きで答えるか
+- [ ] unified-chat-bot.yml をインポートし、モデル/`dataset_ids`（2 箇所）/
+      `DOCSTORE_URL` を差し替えたか
+- [ ] 初回 full sync が成功し、完全 bot が出典付きで答えるか
+- [ ] 定期 cron（`sync-cron`）または GROWI webhook のどちらかが動いているか
+      （公開してもいつまでも反映されない、を防ぐ）
 
 このチェックリストが全部 ✅ なら、その組織で動く。
 特定ベンダーへの依存は Adapter と Dify のモデル設定に閉じている。

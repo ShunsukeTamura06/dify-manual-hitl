@@ -29,17 +29,24 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 
 | Phase | 内容 | 状態 |
 |-------|------|------|
-| 1a | 質問 Bot（RAG・出典・矛盾検出） | 🟢 実機検証済 |
-| 1b | Wiki → Dify Knowledge の自動同期 | 🟢 実機検証済 |
-| 1c | 登録 Bot（アップロード → 整形 → GROWI 下書き） | 🟢 実機検証済 |
-| 2  | Vision LLM での画像/図形対応、前処理サービス | ⚪ 未着手 |
-| 3  | 他チームへの展開（Adapter 差し替え） | ⚪ 未着手 |
+| 1a | 質問 Bot（RAG・出典・矛盾検出・更新日表示・古さ注記） | 🟢 実機検証済 |
+| 1b | Wiki → Dify Knowledge の自動同期（定期 cron + GROWI webhook） | 🟢 実機検証済 |
+| 1c | 登録 Bot（アップロード → 整形 → GROWI 下書き、既存とのマージ更新） | 🟢 実機検証済 |
+| 1d | 完全 bot（質問/登録/一括取り込み/重複排除/承認待ち確認を 1 チャットに統合） | 🟢 実機検証済 |
+| 1e | 重複排除（提示 → 承認 → 統合 → 退役、完全性チェック） | 🟢 実機検証済 |
+| 2  | Vision LLM での画像/図形対応、Excel/Word セル結合の展開 | ⚪ 検証のみ・未実装（PoC 済み） |
+| 3  | 他チームへの展開（Filesystem/Obsidian Adapter 等の追加） | ⚪ 未着手 |
 
-**Phase 1 全ループを実機で実証済み**（ローカル: GROWI 7.4.2 + Dify 1.9.2 + OpenAI）。
-登録（ファイル→整形→GROWI 下書き）→ 同期 → 質問（出典付き回答・**異なるマニュアル間の
-矛盾を自動検出**）まで通しで動作確認した。検証手順は [local-dev/README.md](local-dev/README.md)。
+**Dify + GROWI での一通りの機能を実機で実証済み**
+（ローカル: GROWI 7.4.2 + Dify 1.9.2 + OpenAI）。完全 bot への登録（ファイル→整形→
+GROWI 下書き）→ GROWI で公開（HITL）→ 自動同期 → 質問（出典 URL・最終更新日つき回答、
+異なるマニュアル間の**矛盾を自動検出**）→ 大きなファイルの自動分割登録 → 重複ページの
+検出・統合（欠落チェック付き）→ 承認待ち一覧の確認、まで一気通貫で動作確認した。
+検証手順は [local-dev/README.md](local-dev/README.md)、デプロイ手順は
+[DEPLOYMENT.md](DEPLOYMENT.md)。
 
-詳細は [docs/phase-plan.md](docs/phase-plan.md)。
+詳細は [docs/phase-plan.md](docs/phase-plan.md)、完全 bot の設計は
+[docs/unified-chat-design.md](docs/unified-chat-design.md)。
 
 ## ディレクトリ
 
@@ -57,15 +64,20 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 ├── contracts/                 # コンポーネント間の契約（OpenAPI 等）
 │   └── docstore-openapi.yaml  # DocStore Adapter API 仕様
 ├── services/                  # Dify とは独立した HTTP サービス群
-│   ├── docstore-growi/        # GROWI 向け DocStore Adapter
-│   └── sync/                  # DocStore → Dify Knowledge 同期サービス
+│   ├── docstore-growi/        # GROWI 向け DocStore Adapter（pending-approval/deprecate 含む）
+│   └── sync/                  # DocStore → Dify Knowledge 同期サービス（webhook + cron 自動化）
 ├── dify/
-│   └── workflows/             # Dify Chatflow/Workflow DSL
-│       ├── phase1a-qa-bot.yml          # 質問 Bot
-│       ├── phase1c-registration-bot.yml # 登録 Bot（参照用 YAML）
-│       ├── phase1c-setup.md            # 登録 Bot の UI 構築手順 + 一気通貫テスト
-│       ├── prompts/                    # 登録 Bot のプロンプト（整形）
-│       └── README.md                   # インポート手順
+│   ├── workflows/             # Dify Chatflow/Workflow DSL（インポート成果物）
+│   │   ├── unified-chat-bot.yml         # 完全 bot（推奨・これ1本をインポート）
+│   │   ├── phase1a-qa-bot.yml           # 質問 Bot（完全bot の構成部品ソース）
+│   │   ├── phase1c-registration-bot.yml # 登録 Bot（同上）
+│   │   ├── bulk-import-bot.yml          # 一括取り込み Bot（同上）
+│   │   ├── dedup-bot.yml                # 重複排除 Bot（同上。単体インポートも可）
+│   │   ├── phase1c-setup.md             # 登録 Bot の UI 構築手順 + 一気通貫テスト
+│   │   ├── prompts/                     # 整形プロンプト
+│   │   └── README.md                    # インポート手順
+│   ├── unified-chat/          # 完全 bot のルーターコア（Python・テスト付き）+ DSL 合成スクリプト
+│   └── dedup/                 # 重複排除のクラスタリング/統合ロジック（Python・テスト付き）+ DSL 合成スクリプト
 ├── conventions/               # IA・ライティング規約・テンプレ
 │   ├── manual-template.md     # 標準マニュアルテンプレート
 │   └── writing-style.md       # ライティング規約（RAG 最適化）
@@ -78,10 +90,13 @@ Dify を中核に、Wiki 層（GROWI 等）と疎結合に組み合わせて構�
 **重要**: `services/` と `contracts/` は Dify 非依存。
 Dify は HTTP Request ノードで services を叩くだけで、内部実装を知らない。
 
-## 今やること（Phase 1a）
+## 今やること
 
-1. `dify/workflows/README.md` の手順に従って、Dify にナレッジを作成
-2. 既存マニュアル 5-10 本をアップロード
-3. `phase1a-qa-bot.yml` をインポートしてキー類を差し替え
-4. 実地で 20 件の質問テスト
-5. 評価ルーブリックで合否判定 → 次フェーズの意思決定
+Dify + GROWI での機能一式（Phase 1a〜1e）は完成・実機検証済み。
+新規に環境を用意する場合は [DEPLOYMENT.md](DEPLOYMENT.md) の手順に従う
+（`unified-chat-bot.yml` を 1 つインポートすれば動く）。
+
+次の意思決定ポイントは Phase 2（Vision LLM 前処理、Excel/Word のセル結合展開）と
+Phase 3（GROWI 以外の Wiki への展開）。どちらも PoC 止まりで、実装は未着手。
+実データでの評価（[evaluation/README.md](evaluation/README.md)）を先に回して、
+着手の優先度を判断する。

@@ -401,7 +401,7 @@ workflow:
       width: 242
     - data:
         dataset_ids:
-        - S0nYaYbe1DHkjfH5U6D5w4pA61DRnyluxbefZo6ujFnrilynfgF6N7Zp6B2MQzmp
+        - REPLACE_WITH_YOUR_DATASET_ID
         multiple_retrieval_config:
           reranking_enable: false
           reranking_mode: weighted_score

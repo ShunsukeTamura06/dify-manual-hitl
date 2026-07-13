@@ -2,6 +2,15 @@
 
 Dify Chatflow / Workflow の DSL (YAML) 定義置き場。
 
+> **実運用でインポートするのは [unified-chat-bot.yml](unified-chat-bot.yml)（完全 bot）
+> 1 本でよい。** 質問・登録・一括取り込み・重複排除・承認待ち確認の 5 機能を
+> 1 つのチャット窓口で受ける。手順は [../../DEPLOYMENT.md](../../DEPLOYMENT.md) の
+> Step 4 を参照。
+>
+> 以下の Phase 1a 手順は、`phase1a-qa-bot.yml` を**単体で**動かして質問精度を
+> 評価するための手順（完全 bot の構成部品としての質問ルートの土台と同じ DSL）。
+> 完全 bot 全体の設計は [../../docs/unified-chat-design.md](../../docs/unified-chat-design.md)。
+
 ## Phase 1a: マニュアル質問 Bot
 
 ファイル: [phase1a-qa-bot.yml](phase1a-qa-bot.yml)
