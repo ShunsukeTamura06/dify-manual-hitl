@@ -17,11 +17,16 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from .logging_setup import configure_logging
-from .routes import changes, debug, meta, pages
+from .routes import approvals, changes, debug, meta, pages
 from .settings import get_settings
 
 # 認証を免除するパス（死活監視はキーなしで叩けるようにする）
 _AUTH_EXEMPT_PATHS = frozenset({"/health"})
+# ヘッダの代わりにクエリパラメータ ?key= でも認証できるパスの接頭辞。
+# ブラウザの素のクリック/フォーム送信はカスタムヘッダを送れないため
+# （services/sync の GROWI_WEBHOOK_TOKEN と同じ ?token= 方式を踏襲）。
+# approvals.py のモジュールdocstring参照。
+_QUERY_KEY_ALLOWED_PREFIXES = ("/approvals",)
 
 
 def create_app() -> FastAPI:
@@ -55,21 +60,27 @@ def create_app() -> FastAPI:
         無認証で公開しない（キー未設定はローカル開発用の明示的な選択）。
         """
         key = settings.adapter_api_key
-        if (
-            key
-            and request.url.path not in _AUTH_EXEMPT_PATHS
-            and request.headers.get("x-api-key") != key
-        ):
-            return JSONResponse(
-                status_code=401,
-                content={"error_code": "unauthorized", "message": "X-API-Key が必要です"},
-            )
+        path = request.url.path
+        if key and path not in _AUTH_EXEMPT_PATHS:
+            header_ok = request.headers.get("x-api-key") == key
+            query_ok = path.startswith(
+                _QUERY_KEY_ALLOWED_PREFIXES
+            ) and request.query_params.get("key") == key
+            if not (header_ok or query_ok):
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error_code": "unauthorized",
+                        "message": "X-API-Key（/approvals は ?key= も可）が必要です",
+                    },
+                )
         return await call_next(request)
 
     app.include_router(meta.router)
     app.include_router(pages.router)
     app.include_router(changes.router)
     app.include_router(debug.router)
+    app.include_router(approvals.router)
 
     return app
 

@@ -211,6 +211,35 @@ async def test_full_sync_syncs_pages_without_status() -> None:
 
 
 @pytest.mark.asyncio
+async def test_full_sync_excludes_unrecognized_status_typo() -> None:
+    # GROWI で手編集した際のタイプミス（例: "pubished"）はフェイルオープンで
+    # 誤って公開扱いにせず、安全側（同期しない）に倒す。
+    docstore = FakeDocStore([_page("p1", "タイプミス", status="pubished")])
+    dify = FakeDify()
+    engine = SyncEngine(docstore, dify, embed_header=False)  # type: ignore[arg-type]
+
+    result = await engine.full_sync()
+
+    assert result.created == 0
+    assert result.skipped == 1
+
+
+@pytest.mark.asyncio
+async def test_full_sync_removes_page_with_unrecognized_status() -> None:
+    # 既に Dify にある公開済みページの status が壊れた場合、検索からは消す
+    # （壊れた状態を安全側＝非公開扱いにする）。
+    docstore = FakeDocStore([_page("p1", "壊れた", status="pubished")])
+    existing_name = encode_doc_name("p1", "壊れた")
+    dify = FakeDify(docs=[{"id": "d1", "name": existing_name}])
+    engine = SyncEngine(docstore, dify, embed_header=False)  # type: ignore[arg-type]
+
+    result = await engine.full_sync()
+
+    assert result.deleted == 1
+    assert "d1" not in dify.docs
+
+
+@pytest.mark.asyncio
 async def test_diff_sync_skips_draft_update_event() -> None:
     # 差分同期でも draft の更新イベントは取り込まない
     docstore = FakeDocStore(

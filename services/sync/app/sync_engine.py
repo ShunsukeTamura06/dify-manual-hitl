@@ -13,6 +13,10 @@ status フィルタ:
 - metadata.status が exclude_statuses（既定: draft / deprecated）のページは同期しない。
   登録 Bot が作る下書きは、人が GROWI で公開（HITL 承認）するまで検索に出さない。
 - 既に Dify にあるページが除外ステータスへ遷移した場合は Dify から削除する。
+- status が未設定（空文字）の既存ページは後方互換で従来通り同期する。
+  一方、status に何か値は入っているが既知の値（draft/published/deprecated）
+  のどれでもない場合（GROWI で手編集した際のタイプミス等）は、フェイルオープン
+  で誤って公開扱いにしないよう、安全側（同期しない）に倒す。
 """
 
 import logging
@@ -27,6 +31,11 @@ logger = logging.getLogger(__name__)
 
 # 同期対象外とする metadata.status（承認前の下書き・退役ページは検索に出さない）
 DEFAULT_EXCLUDE_STATUSES = frozenset({"draft", "deprecated"})
+
+# このプロジェクトの書き込み経路（登録Bot/dedup/approvals）が実際に設定しうる値。
+# これ以外の値は「未設定」ではなく「何か書かれているが解釈できない」ため、
+# フェイルオープンで公開扱いにしないよう同期を除外する（安全側のデフォルト）。
+_KNOWN_STATUSES = frozenset({"draft", "published", "deprecated"})
 
 
 class SyncEngine:
@@ -66,10 +75,11 @@ class SyncEngine:
             result.errors.append(f"get_page({page_id}) 失敗: {exc}")
             return
 
-        # 除外ステータス（draft 等）は同期しない。既に Dify にあれば削除する
-        # （公開済みが下書きへ戻された場合も検索から消すため）。
+        # 除外ステータス（draft 等）、または既知でない値（タイプミス等）は同期しない。
+        # 既に Dify にあれば削除する（公開済みが下書きへ戻された場合も検索から消すため）。
         status = str((page.get("metadata") or {}).get("status", "")).strip().lower()
-        if status in self._exclude_statuses:
+        unrecognized_status = bool(status) and status not in _KNOWN_STATUSES
+        if status in self._exclude_statuses or unrecognized_status:
             existing = dify_index.get(page_id)
             if not existing:
                 result.skipped += 1

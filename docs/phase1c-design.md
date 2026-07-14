@@ -119,9 +119,19 @@ DSL は dify/workflows/phase1c-registration-bot.yml（実機からエクスポ�
 ## HITL の位置づけ（軽量）
 
 - 登録 Bot は **下書きを作るところまで**。
-- 公開（status: published 化）は人間が GROWI で行う。
+- 公開（status: published 化）は人間が行う。
   これは「正しさの承認」ではなく「明らかなゴミを出さない最小チェック + 公開操作」。
 - 重い承認フロー・複数承認者・差し戻しは作らない（形骸化するだけ）。
+
+**公開操作は 2 通り**（どちらも status を published にするだけで、中身は同じ）:
+1. GROWI で frontmatter の `status: draft` を `published` に直接編集する。
+2. **`GET /approvals`（承認待ち一覧・ボタン1つ）を使う（✅ 実装済み）**。
+   GROWI の生 YAML を人間が手編集するのは誤操作リスク（タイプミスで
+   `status: pubished` のような無効値になり、フェイルオープンで意図せず
+   公開扱いになる等）があるため、承認だけを目的とする軽量画面を用意した。
+   内容を直したい場合は一覧からリンクされた GROWI エディタを使う（この画面
+   自体は編集機能を持たない＝1ボタン=1操作を保つ）。詳細は
+   [services/docstore-growi/README.md](../services/docstore-growi/README.md)。
 
 ---
 

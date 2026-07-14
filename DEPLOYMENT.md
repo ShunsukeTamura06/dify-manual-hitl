@@ -164,7 +164,10 @@ curl -X POST http://<sync>/sync -H 'Content-Type: application/json' -d '{"mode":
    類似ページがあれば併せて提示される（ブロックはしない）
 2. 完全 bot に「承認待ち一覧を見せて」と聞く → 下書き中のページが一覧表示される
    （`GET /pages/pending-approval`）
-3. Wiki で内容を確認し、`status: published` にして公開する（これが HITL の承認操作）
+3. 内容を確認し、`status: published` にして公開する（これが HITL の承認操作）。
+   GROWI で frontmatter を直接編集してもよいが、YAML の手編集は誤操作のリスクが
+   あるため、Adapter の `GET /approvals` （承認待ち一覧 + ボタン1つで公開）を
+   使うのが簡単（[services/docstore-growi/README.md](services/docstore-growi/README.md)）
 4. 自動同期（cron または GROWI webhook。手動なら `POST /sync`）で Dify Knowledge に反映
 5. 完全 bot に質問する → 出典 URL + 最終更新日つきで回答が返る。古い情報には
    自動で「最新か確認を」の注記が付く

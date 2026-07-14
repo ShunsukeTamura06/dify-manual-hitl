@@ -24,12 +24,38 @@ app/
 ├── mappers.py       # GROWI ↔ DocStore 変換
 ├── deps.py          # DI
 └── routes/
-    ├── pages.py     # /pages CRUD
+    ├── pages.py     # /pages CRUD（DocStore の JSON 契約）
+    ├── approvals.py # /approvals（人間向けHTML。承認ボタンでYAML手編集を不要にする）
     ├── changes.py   # /pages/changes 差分検知
     └── meta.py      # /health, /info
 tests/
 └── test_mappers.py  # 変換ロジックの単体テスト（GROWI 実機不要）
 ```
+
+## 承認待ち一覧（ブラウザで完結する HITL 承認）
+
+`GET /approvals` を開くと、下書き中（`status: draft`）のページが一覧表示され、
+「承認して公開する」ボタンを押すだけで `status: published` に切り替わる。
+GROWI 上で frontmatter の YAML を直接手編集する必要がなくなり、タイプミスによる
+事故（意図せず公開扱いになる／されない）を防ぐ。内容を直したい場合は、一覧の
+「内容を確認（GROWI）」リンクから GROWI エディタを使う（承認画面自体には
+編集機能を持たせない）。
+
+```bash
+open http://localhost:8001/approvals
+```
+
+**認証**: `ADAPTER_API_KEY` を設定している場合、`/approvals` はヘッダではなく
+`?key=<ADAPTER_API_KEY>` クエリパラメータでも認証できる（ブラウザの素のクリック
+はカスタムヘッダを送れないため。`services/sync` の `GROWI_WEBHOOK_TOKEN` と同じ
+`?token=` 方式を踏襲）。管理者が `http://<host>:8001/approvals?key=<キー>` の
+URL を一度共有すれば、以降の一覧・承認ボタンは自動でキーを引き継ぐ。
+`ADAPTER_API_KEY` 未設定なら他のエンドポイント同様キー不要。
+
+キーを知っていて到達できるネットワークの人は誰でも承認できる、という
+ネットワーク到達性ベースの認可モデル（狭い社内網での運用を想定）。より広い
+ネットワークに公開する場合は、前段にリバースプロキシ認証を置くか、この
+機能自体を無効化する（ポートを公開しない）こと。
 
 ## セットアップ
 

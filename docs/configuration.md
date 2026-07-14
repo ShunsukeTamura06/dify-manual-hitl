@@ -10,7 +10,7 @@
 | `GROWI_BASE_URL` | ✓ | — | Wiki(GROWI) のベース URL（末尾スラッシュなし） |
 | `GROWI_API_TOKEN` | ✓ | — | Wiki の API トークン（秘密。`.env` のみ） |
 | `MANUAL_ROOT_PATH` |  | `/manuals` | 対象にするマニュアルのルートパス。空で全ページ |
-| `ADAPTER_API_KEY` | 推奨 | （空=認証なし） | 設定すると全エンドポイント（`/health` 除く）で `X-API-Key` を要求。Wiki への書込 API を無認証で公開しないため、共有ネットワークでは必ず設定する |
+| `ADAPTER_API_KEY` | 推奨 | （空=認証なし） | 設定すると全エンドポイント（`/health` 除く）で `X-API-Key` を要求。Wiki への書込 API を無認証で公開しないため、共有ネットワークでは必ず設定する。ただし `/approvals`（承認ボタン画面）はブラウザがヘッダを送れないため、`X-API-Key` の代わりに `?key=<ADAPTER_API_KEY>` クエリでも通す |
 | `PORT` |  | `8001` | 待ち受けポート |
 | `LOG_LEVEL` |  | `INFO` | ログレベル |
 | `LOG_DIR` |  | `logs` | ログ出力先 |
