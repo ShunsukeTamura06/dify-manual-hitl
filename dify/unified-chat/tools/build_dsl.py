@@ -475,6 +475,16 @@ def validate(dsl: dict) -> list[str]:
     edge_ids = [e["id"] for e in edges]
     if len(edge_ids) != len(set(edge_ids)):
         errors.append("エッジ ID が重複している")
+
+    # iteration-start ノードは外側 type が custom-iteration-start でないと
+    # Dify のキャンバス描画が壊れる（React error #130。バックエンド実行は
+    # 影響を受けないため API 経由のテストでは検出できない、要注意ポイント）。
+    for n in nodes:
+        if n["data"].get("type") == "iteration-start" and n.get("type") != "custom-iteration-start":
+            errors.append(
+                f"node {n['id']}: iteration-start ノードの外側 type が "
+                f"{n.get('type')!r}（custom-iteration-start であるべき）"
+            )
     return errors
 
 

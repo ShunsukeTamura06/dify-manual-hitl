@@ -781,7 +781,7 @@ workflow:
       position:
         x: 20
         y: 90
-      type: custom
+      type: custom-iteration-start
       parentId: merge_iter
       zIndex: 1002
     - data:

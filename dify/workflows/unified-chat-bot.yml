@@ -2250,7 +2250,7 @@ workflow:
       position:
         x: 20
         y: 1190
-      type: custom
+      type: custom-iteration-start
       parentId: d_merge_iter
       zIndex: 1002
     - data:

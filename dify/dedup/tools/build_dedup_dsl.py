@@ -218,7 +218,11 @@ def _node(nid, ntype, title, extra, x, y, parent=None):
     if parent:
         data["isInIteration"] = True
         data["iteration_id"] = parent
-    node = {"data": data, "id": nid, "position": {"x": x, "y": y}, "type": "custom"}
+    # 外側の type は通常 "custom" だが、iteration-start ノードだけは
+    # Dify のキャンバス描画が別コンポーネントとして扱うため
+    # "custom-iteration-start" でなければならない（Reactのレンダリングが壊れる）。
+    outer_type = "custom-iteration-start" if ntype == "iteration-start" else "custom"
+    node = {"data": data, "id": nid, "position": {"x": x, "y": y}, "type": outer_type}
     if parent:
         node["parentId"] = parent
         node["zIndex"] = 1002
@@ -473,6 +477,8 @@ def main() -> None:
     header = (
         "# 重複排除Bot — dify/dedup/tools/build_dedup_dsl.py が生成（提示→承認→統合→退役）\n"
         "# 決定的ロジックの真実は dify/dedup/（clustering.py / execution.py）とテスト。\n"
+        "# 一覧取得(http_list)・フィルタ(parse_list)・提案整形(build/format)は\n"
+        "# build_dedup_dsl.py の管理外（このファイルを直接編集する）。\n"
         "# インポート後: environment_variables の DOCSTORE_URL / DOCSTORE_API_KEY、LLM モデル。\n"
     )
     DSL.write_text(header + yaml.dump(dsl, allow_unicode=True, sort_keys=False))
