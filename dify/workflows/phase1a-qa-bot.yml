@@ -149,7 +149,7 @@ workflow:
             name: claude-sonnet-4-5-20250929   # ← 利用可能な最新の Claude モデル名に
             mode: chat
             completion_params:
-              temperature: 0.1          # 決定性重視
+              temperature: 1.0          # Claude Sonnet 5 系は 1.0 以外を受け付けないモデルがある
               max_tokens: 2000
           prompt_template:
             - role: system

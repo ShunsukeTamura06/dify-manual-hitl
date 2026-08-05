@@ -629,7 +629,7 @@ workflow:
         model:
           completion_params:
             max_tokens: 4000
-            temperature: 0.2
+            temperature: 1.0
           mode: chat
           name: gpt-4o-mini
           provider: langgenius/openai/openai
@@ -728,7 +728,7 @@ workflow:
           '
         model:
           completion_params:
-            temperature: 0
+            temperature: 1.0
           mode: chat
           name: gpt-4o-mini
           provider: langgenius/openai/openai
@@ -853,7 +853,7 @@ workflow:
         model:
           completion_params:
             max_tokens: 4000
-            temperature: 0
+            temperature: 1.0
           mode: chat
           name: gpt-4o-mini
           provider: langgenius/openai/openai
@@ -948,7 +948,7 @@ workflow:
         model:
           completion_params:
             max_tokens: 4000
-            temperature: 0.2
+            temperature: 1.0
           mode: chat
           name: gpt-4o-mini
           provider: langgenius/openai/openai
@@ -1118,7 +1118,7 @@ workflow:
           mode: chat
           completion_params:
             max_tokens: 4000
-            temperature: 0.2
+            temperature: 1.0
         prompt_template:
         - role: system
           text: "あなたは社内マニュアルに基づいて質問に答えるアシスタントです。\n\n# 厳守ルール\n1. 提供された「コンテキスト」の情報のみを使って回答する。コンテキストに無い情報は推測しない。\n\
@@ -1272,7 +1272,7 @@ workflow:
         model:
           completion_params:
             max_tokens: 8000
-            temperature: 0.2
+            temperature: 1.0
           mode: chat
           name: gpt-4o-mini
           provider: langgenius/openai/openai
@@ -1520,7 +1520,7 @@ workflow:
         model:
           completion_params:
             max_tokens: 8000
-            temperature: 0.2
+            temperature: 1.0
           mode: chat
           name: gpt-4o-mini
           provider: langgenius/openai/openai
@@ -2305,7 +2305,7 @@ workflow:
           name: gpt-4o-mini
           mode: chat
           completion_params:
-            temperature: 0.2
+            temperature: 1.0
             max_tokens: 4000
         prompt_template:
         - role: system
@@ -2565,7 +2565,7 @@ workflow:
         desc: 意図を qa/register/bulk/dedup/pending に分類。最終決定はルーターCodeが事実で矯正
         model:
           completion_params:
-            temperature: 0
+            temperature: 1.0
             max_tokens: 20
           mode: chat
           name: gpt-4o-mini

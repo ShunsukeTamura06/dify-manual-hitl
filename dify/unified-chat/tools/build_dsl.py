@@ -147,7 +147,8 @@ def build() -> dict:
             "desc": "意図を qa/register/bulk/dedup/pending に分類。最終決定はルーターCodeが事実で矯正",
             "model": {
                 **copy.deepcopy(reg_llm_model),
-                "completion_params": {"temperature": 0, "max_tokens": 20},
+                # Claude Sonnet 5 系は 1.0 以外を受け付けないモデルがあるため既定を 1.0 に
+                "completion_params": {"temperature": 1.0, "max_tokens": 20},
             },
             "prompt_template": [
                 {

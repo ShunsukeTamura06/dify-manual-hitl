@@ -836,7 +836,7 @@ workflow:
           name: gpt-4o-mini
           mode: chat
           completion_params:
-            temperature: 0.2
+            temperature: 1.0
             max_tokens: 4000
         prompt_template:
         - role: system

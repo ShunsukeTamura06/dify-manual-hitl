@@ -394,7 +394,7 @@ workflow:
         model:
           completion_params:
             max_tokens: 8000
-            temperature: 0.2
+            temperature: 1.0
           mode: chat
           name: gpt-4o-mini
           provider: langgenius/openai/openai
@@ -677,7 +677,7 @@ workflow:
         model:
           completion_params:
             max_tokens: 8000
-            temperature: 0.2
+            temperature: 1.0
           mode: chat
           name: gpt-4o-mini
           provider: langgenius/openai/openai
