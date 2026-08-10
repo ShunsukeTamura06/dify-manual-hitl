@@ -762,18 +762,18 @@ workflow:
       type: custom
       width: 242
     - data:
-        answer: '処理が完了しました。新規の場合は下書き（draft）です。GROWI で内容を確認し、公開（status: published）してください。既存ページの更新の場合は
-          status は変わっていません。
-
-
-          ## 類似ページ（重複の可能性・参考）
+        answer: '## 類似ページ（重複の可能性・参考）
 
           {{#sim_format.text#}}
 
 
           ---
 
-          結果: {{#http_upsert.body#}}'
+          結果: {{#http_upsert.body#}}
+
+
+          処理が完了しました。新規の場合は下書き（draft）です。GROWI で内容を確認し、公開（status: published）してください。既存ページの更新の場合は
+          status は変わっていません。'
         title: 完了通知
         type: answer
       height: 183
@@ -1738,10 +1738,10 @@ workflow:
       type: custom
       width: 244
     - data:
-        answer: '一括取り込みが完了しました（status: draft）。GROWI で内容を確認し、問題なければ公開してください。
+        answer: '{{#b_summarize.text#}}
 
 
-          {{#b_summarize.text#}}'
+          一括取り込みが完了しました（status: draft）。GROWI で内容を確認し、問題なければ公開してください。'
         desc: ''
         selected: false
         title: 完了通知

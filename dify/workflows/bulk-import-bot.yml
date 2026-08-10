@@ -907,10 +907,10 @@ workflow:
       type: custom
       width: 244
     - data:
-        answer: '一括取り込みが完了しました（status: draft）。GROWI で内容を確認し、問題なければ公開してください。
+        answer: '{{#summarize.text#}}
 
 
-          {{#summarize.text#}}'
+          一括取り込みが完了しました（status: draft）。GROWI で内容を確認し、問題なければ公開してください。'
         desc: ''
         selected: false
         title: 完了通知
