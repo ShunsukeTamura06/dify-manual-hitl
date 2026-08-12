@@ -156,6 +156,29 @@ curl -X POST http://<sync>/sync -H 'Content-Type: application/json' -d '{"mode":
 
 設定は [services/sync/README.md](services/sync/README.md) の「自動同期」節を参照。
 
+### Step 6. 使い方ドキュメントを Wiki に投入する（推奨）
+
+エンドユーザーが「登録の仕方は？」「公開したのに検索に出ない」と bot に聞いたとき、
+bot 自身が答えられるようにする。専用の仕組みは足さず、**使い方ドキュメント自体を
+Wiki の記事として登録する**（Wiki が正典という設計に一致。出典 URL・更新日表示など
+既存の仕組みがそのまま効く）。
+
+```bash
+export DOCSTORE_URL=http://localhost:8001
+export DOCSTORE_API_KEY=            # ADAPTER_API_KEY を設定した場合のみ
+python3 tools/publish_user_guide.py --dry-run   # 対象を確認
+python3 tools/publish_user_guide.py             # 投入
+```
+
+投入されるのは [docs/user-guide/](docs/user-guide/) 配下の 5 本
+（登録の仕方 / 承認の仕方 / 反映されないとき / 質問の仕方 / 重複整理）。
+`/manuals/システム/マニュアル管理/` 配下に `published` で作られ、次の同期で
+質問 bot が答えられるようになる。冪等なので、内容を直したら再実行すればよい。
+
+> LLM を通さず決定的に投入する（登録 Bot 経由だと整形で内容が変わるため）。
+> `published` で入れるのは、この文書が人の手で書かれ git で版管理され、管理者が
+> 明示的にこのコマンドを実行する＝その時点で人の確認を経ているため。
+
 ---
 
 ## 動作確認（一気通貫）
